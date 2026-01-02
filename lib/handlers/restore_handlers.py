@@ -49,13 +49,13 @@ class RestoreHandlers:
                 backup_items.append((backup['name'], backup['name']))
 
             # Show selection dialog
-            code, selected_backup = self.ui.select_from_list(
+            selected_backup = self.ui.select_from_list(
                 backup_items,
                 "Select nginx backup to restore:",
                 "Restore nginx"
             )
 
-            if code != self.ui.d.OK or not selected_backup:
+            if not selected_backup:
                 return
 
             # Confirm restore
@@ -116,13 +116,13 @@ class RestoreHandlers:
                 backup_items.append((backup['name'], backup['name']))
 
             # Show selection dialog
-            code, selected_backup = self.ui.select_from_list(
+            selected_backup = self.ui.select_from_list(
                 backup_items,
                 "Select Mailcow backup to restore:",
                 "Restore Mailcow"
             )
 
-            if code != self.ui.d.OK or not selected_backup:
+            if not selected_backup:
                 return
 
             # Confirm restore
