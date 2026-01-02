@@ -240,7 +240,7 @@ class MaintenanceHandlers:
                 return
 
             # Get current retention policy from config
-            retention = backup_mgr.retention
+            retention = backup_mgr.borg_config['retention']
 
             # Select service to cleanup
             services = [
