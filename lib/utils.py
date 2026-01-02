@@ -84,7 +84,8 @@ def run_command(
     capture_output: bool = True,
     timeout: Optional[int] = None,
     cwd: Optional[str] = None,
-    env: Optional[dict] = None
+    env: Optional[dict] = None,
+    input_data: Optional[str] = None
 ) -> Tuple[int, str, str]:
     """
     Execute a shell command safely
@@ -96,6 +97,7 @@ def run_command(
         timeout: Command timeout in seconds
         cwd: Working directory
         env: Environment variables
+        input_data: Data to pass to stdin
 
     Returns:
         Tuple of (return_code, stdout, stderr)
@@ -114,7 +116,8 @@ def run_command(
             text=True,
             timeout=timeout,
             cwd=cwd,
-            env=env
+            env=env,
+            input=input_data
         )
 
         logger.debug(f"Command completed with return code: {result.returncode}")

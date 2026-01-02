@@ -388,7 +388,7 @@ networks:
                     check=True,
                     cwd=mailcow_path,
                     timeout=60,
-                    input_data=f"{domain}\n{timezone}\n"
+                    input_data=f"{domain}\n{timezone}\n1\n"  # 1 = master branch
                 )
 
                 logger.info("Configuration generated successfully")
