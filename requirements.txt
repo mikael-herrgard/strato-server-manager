@@ -1,0 +1,21 @@
+# Server Manager - Python Dependencies
+# Core TUI
+pythondialog>=3.5.3
+
+# Configuration
+PyYAML>=6.0
+
+# SSH and networking
+paramiko>=3.0.0
+
+# Docker integration
+docker>=6.0.0
+
+# Scheduling
+python-crontab>=2.7.0
+
+# Cryptography
+cryptography>=41.0.0
+
+# Utilities
+python-dateutil>=2.8.0

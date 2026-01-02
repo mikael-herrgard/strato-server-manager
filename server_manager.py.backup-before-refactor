@@ -1,0 +1,1585 @@
+#!/opt/server-manager/venv/bin/python3
+"""
+Server Manager - Main Entry Point
+Unified TUI application for server management, backups, and disaster recovery
+"""
+
+import sys
+import os
+from pathlib import Path
+
+# Add lib directory to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from lib.ui import ServerManagerUI, ProgressTracker
+from lib.config import get_config
+from lib.utils import logger, check_root, get_hostname, get_ip_address
+from lib.backup import BackupManager
+from lib.restore import RestoreManager
+from lib.installation import InstallationManager
+from lib.system_config import SystemConfigManager
+from lib.maintenance import MaintenanceManager
+from lib.monitoring import MonitoringManager
+
+
+class ServerManager:
+    """Main application controller"""
+
+    def __init__(self):
+        """Initialize server manager"""
+        self.ui = ServerManagerUI("Server Manager")
+        self.config = get_config()
+        self.running = True
+        self.backup_manager = None  # Lazy initialization
+        self.restore_manager = None  # Lazy initialization
+        self.installation_manager = None  # Lazy initialization
+        self.system_config_manager = None  # Lazy initialization
+        self.maintenance_manager = None  # Lazy initialization
+        self.monitoring_manager = None  # Lazy initialization
+
+        logger.info("Server Manager started")
+
+    def run(self):
+        """Main application loop"""
+        # Check if running as root
+        if not check_root():
+            self.ui.show_error(
+                "This application must be run as root.\n\n"
+                "Please run: sudo /opt/server-manager/server_manager.py",
+                "Root Required"
+            )
+            return
+
+        # Show welcome message on first run
+        self._check_first_run()
+
+        # Main menu loop
+        while self.running:
+            try:
+                choice = self.ui.show_main_menu()
+
+                if choice == "exit" or choice == "0":
+                    if self.ui.confirm_action("Are you sure you want to exit?", "Exit"):
+                        self.running = False
+                        logger.info("Server Manager exiting")
+                elif choice == "1":
+                    self._backup_menu()
+                elif choice == "2":
+                    self._restore_menu()
+                elif choice == "3":
+                    self._installation_menu()
+                elif choice == "4":
+                    self._system_menu()
+                elif choice == "5":
+                    self._maintenance_menu()
+                elif choice == "6":
+                    self._monitoring_menu()
+                elif choice == "7":
+                    self._settings_menu()
+
+            except KeyboardInterrupt:
+                if self.ui.confirm_action("Are you sure you want to exit?", "Exit"):
+                    self.running = False
+                    logger.info("Server Manager interrupted by user")
+
+            except Exception as e:
+                logger.error(f"Error in main loop: {e}", exc_info=True)
+                self.ui.show_error(f"An error occurred: {e}", "Error")
+
+    def _check_first_run(self):
+        """Check if this is first run and show welcome message"""
+        state_file = Path("/opt/server-manager/state/first_run")
+
+        if not state_file.exists():
+            hostname = get_hostname()
+            ip = get_ip_address()
+
+            welcome_msg = f"""Welcome to Server Manager v1.0!
+
+This is your first time running the application.
+
+Current System Information:
+- Hostname: {hostname}
+- IP Address: {ip}
+
+Before you begin, please ensure:
+1. Configuration file is set up (config/settings.yaml)
+2. SSH key for rsync backup server is configured
+3. BORG_PASSPHRASE is set in /root/.env
+
+You can configure these settings in the Settings menu.
+
+Press OK to continue..."""
+
+            self.ui.show_info(welcome_msg, "Welcome")
+
+            # Create state directory and mark first run complete
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            state_file.touch()
+
+    def _backup_menu(self):
+        """Handle backup management menu"""
+        while True:
+            choice = self.ui.show_backup_menu()
+
+            if choice == "back" or choice == "0":
+                break
+            elif choice == "1":
+                self._backup_nginx()
+            elif choice == "2":
+                self._backup_mailcow()
+            elif choice == "3":
+                self._backup_scripts()
+            elif choice == "4":
+                self._view_backup_status()
+            elif choice == "5":
+                self._configure_backup_schedule()
+
+    def _restore_menu(self):
+        """Handle restore management menu"""
+        while True:
+            choice = self.ui.show_restore_menu()
+
+            if choice == "back" or choice == "0":
+                break
+            elif choice == "1":
+                self._restore_nginx()
+            elif choice == "2":
+                self._restore_mailcow()
+            elif choice == "3":
+                self._restore_scripts()
+            elif choice == "4":
+                self._list_backups()
+
+    def _installation_menu(self):
+        """Handle installation menu"""
+        while True:
+            choice = self.ui.show_installation_menu()
+
+            if choice == "back" or choice == "0":
+                break
+            elif choice == "1":
+                self._install_docker()
+            elif choice == "2":
+                self._install_mailcow()
+            elif choice == "3":
+                self._install_nginx()
+            elif choice == "4":
+                self._install_portainer()
+            elif choice == "5":
+                self._check_prerequisites()
+
+    def _system_menu(self):
+        """Handle system configuration menu"""
+        while True:
+            choice = self.ui.show_system_menu()
+
+            if choice == "back" or choice == "0":
+                break
+            elif choice == "1":
+                self._disable_ipv6()
+            elif choice == "2":
+                self._enable_ipv6()
+            elif choice == "3":
+                self._configure_firewall()
+            elif choice == "4":
+                self._network_settings()
+            elif choice == "5":
+                self._system_information()
+
+    def _maintenance_menu(self):
+        """Handle maintenance menu"""
+        while True:
+            choice = self.ui.show_maintenance_menu()
+
+            if choice == "back" or choice == "0":
+                break
+            elif choice == "1":
+                self._update_nginx()
+            elif choice == "2":
+                self._update_mailcow()
+            elif choice == "3":
+                self._update_system()
+            elif choice == "4":
+                self._cleanup_backups()
+            elif choice == "5":
+                self._cleanup_docker()
+
+    def _monitoring_menu(self):
+        """Handle status & monitoring menu"""
+        while True:
+            choice = self.ui.show_monitoring_menu()
+
+            if choice == "back" or choice == "0":
+                break
+            elif choice == "1":
+                self._service_status()
+            elif choice == "2":
+                self._disk_usage()
+            elif choice == "3":
+                self._backup_history()
+            elif choice == "4":
+                self._container_stats()
+            elif choice == "5":
+                self._view_logs()
+
+    def _settings_menu(self):
+        """Handle settings menu"""
+        while True:
+            choice = self.ui.show_settings_menu()
+
+            if choice == "back" or choice == "0":
+                break
+            elif choice == "1":
+                self._configure_rsync()
+            elif choice == "2":
+                self._set_retention()
+            elif choice == "3":
+                self._notification_settings()
+            elif choice == "4":
+                self._view_configuration()
+            elif choice == "5":
+                self._edit_configuration()
+
+    # Placeholder methods for future implementation
+    # These will be implemented in later phases
+
+    def _get_backup_manager(self) -> BackupManager:
+        """Get or create backup manager instance"""
+        if self.backup_manager is None:
+            try:
+                self.backup_manager = BackupManager()
+            except Exception as e:
+                logger.error(f"Failed to initialize backup manager: {e}")
+                self.ui.show_error(
+                    f"Failed to initialize backup system:\n\n{e}\n\n"
+                    "Please check your configuration.",
+                    "Backup Error"
+                )
+                raise
+        return self.backup_manager
+
+    def _get_restore_manager(self) -> RestoreManager:
+        """Get or create restore manager instance"""
+        if self.restore_manager is None:
+            try:
+                self.restore_manager = RestoreManager()
+            except Exception as e:
+                logger.error(f"Failed to initialize restore manager: {e}")
+                self.ui.show_error(
+                    f"Failed to initialize restore system:\n\n{e}\n\n"
+                    "Please check your configuration.",
+                    "Restore Error"
+                )
+                raise
+        return self.restore_manager
+
+    def _get_installation_manager(self) -> InstallationManager:
+        """Get or create installation manager instance"""
+        if self.installation_manager is None:
+            try:
+                self.installation_manager = InstallationManager()
+            except Exception as e:
+                logger.error(f"Failed to initialize installation manager: {e}")
+                self.ui.show_error(
+                    f"Failed to initialize installation system:\n\n{e}\n\n"
+                    "Please check your configuration.",
+                    "Installation Error"
+                )
+                raise
+        return self.installation_manager
+
+    def _get_system_config_manager(self) -> SystemConfigManager:
+        """Get or create system config manager instance"""
+        if self.system_config_manager is None:
+            try:
+                self.system_config_manager = SystemConfigManager()
+            except Exception as e:
+                logger.error(f"Failed to initialize system config manager: {e}")
+                self.ui.show_error(
+                    f"Failed to initialize system configuration:\n\n{e}\n\n"
+                    "Please check your configuration.",
+                    "System Config Error"
+                )
+                raise
+        return self.system_config_manager
+
+    def _get_maintenance_manager(self) -> MaintenanceManager:
+        """Get or create maintenance manager instance"""
+        if self.maintenance_manager is None:
+            try:
+                self.maintenance_manager = MaintenanceManager()
+            except Exception as e:
+                logger.error(f"Failed to initialize maintenance manager: {e}")
+                self.ui.show_error(
+                    f"Failed to initialize maintenance system:\n\n{e}\n\n"
+                    "Please check your configuration.",
+                    "Maintenance Error"
+                )
+                raise
+        return self.maintenance_manager
+
+    def _get_monitoring_manager(self) -> MonitoringManager:
+        """Get or create monitoring manager instance"""
+        if self.monitoring_manager is None:
+            try:
+                self.monitoring_manager = MonitoringManager()
+            except Exception as e:
+                logger.error(f"Failed to initialize monitoring manager: {e}")
+                self.ui.show_error(
+                    f"Failed to initialize monitoring system:\n\n{e}\n\n"
+                    "Please check your configuration.",
+                    "Monitoring Error"
+                )
+                raise
+        return self.monitoring_manager
+
+    def _backup_nginx(self):
+        """Backup nginx Proxy Manager"""
+        if not self.ui.confirm_action(
+            "This will create a backup of nginx Proxy Manager.\n\n"
+            "The backup will be stored on your rsync server.\n\n"
+            "Continue?",
+            "Confirm Backup"
+        ):
+            return
+
+        try:
+            backup_mgr = self._get_backup_manager()
+
+            # Show progress
+            self.ui.show_infobox("Creating nginx backup...\nThis may take a few minutes.")
+
+            # Perform backup
+            success = backup_mgr.backup_nginx(verify=True)
+
+            if success:
+                self.ui.show_success(
+                    "nginx Proxy Manager backup completed successfully!\n\n"
+                    "Backup has been verified and stored on the rsync server.",
+                    "Backup Complete"
+                )
+            else:
+                self.ui.show_error(
+                    "nginx backup failed.\n\n"
+                    "Please check the logs for details.",
+                    "Backup Failed"
+                )
+
+        except Exception as e:
+            logger.error(f"nginx backup error: {e}", exc_info=True)
+            self.ui.show_error(
+                f"An error occurred during nginx backup:\n\n{e}",
+                "Backup Error"
+            )
+
+    def _backup_mailcow(self):
+        """Backup Mailcow"""
+        # Ask for backup type
+        backup_types = [
+            ("all", "Complete backup (recommended)", True),
+            ("config", "Configuration only", False),
+            ("mail", "Mail data only", False),
+            ("db", "Database only", False)
+        ]
+
+        backup_type = self.ui.show_radiolist(
+            backup_types,
+            title="Select Backup Type",
+            text="Choose what to backup:"
+        )
+
+        if not backup_type:
+            return
+
+        if not self.ui.confirm_action(
+            f"This will create a {backup_type} backup of Mailcow.\n\n"
+            "This may take significant time depending on mail volume.\n\n"
+            "Continue?",
+            "Confirm Backup"
+        ):
+            return
+
+        try:
+            backup_mgr = self._get_backup_manager()
+
+            # Show progress
+            self.ui.show_infobox(
+                f"Creating Mailcow backup ({backup_type})...\n"
+                "This may take 15-60 minutes depending on data size.\n\n"
+                "Please be patient..."
+            )
+
+            # Perform backup
+            success = backup_mgr.backup_mailcow(backup_type=backup_type, verify=True)
+
+            if success:
+                self.ui.show_success(
+                    f"Mailcow {backup_type} backup completed successfully!\n\n"
+                    "Backup has been verified and stored on the rsync server.",
+                    "Backup Complete"
+                )
+            else:
+                self.ui.show_error(
+                    "Mailcow backup failed.\n\n"
+                    "Please check the logs for details.",
+                    "Backup Failed"
+                )
+
+        except Exception as e:
+            logger.error(f"Mailcow backup error: {e}", exc_info=True)
+            self.ui.show_error(
+                f"An error occurred during Mailcow backup:\n\n{e}",
+                "Backup Error"
+            )
+
+    def _backup_scripts(self):
+        """Backup server manager scripts"""
+        if not self.ui.confirm_action(
+            "This will create a backup of the server-manager application.\n\n"
+            "This includes configuration, logs, and application code.\n\n"
+            "Continue?",
+            "Confirm Backup"
+        ):
+            return
+
+        try:
+            backup_mgr = self._get_backup_manager()
+
+            # Show progress
+            self.ui.show_infobox("Creating application backup...\nThis should be quick.")
+
+            # Perform backup
+            success = backup_mgr.backup_application(verify=True)
+
+            if success:
+                self.ui.show_success(
+                    "Server Manager application backup completed successfully!\n\n"
+                    "Backup has been verified and stored on the rsync server.",
+                    "Backup Complete"
+                )
+            else:
+                self.ui.show_error(
+                    "Application backup failed.\n\n"
+                    "Please check the logs for details.",
+                    "Backup Failed"
+                )
+
+        except Exception as e:
+            logger.error(f"Application backup error: {e}", exc_info=True)
+            self.ui.show_error(
+                f"An error occurred during application backup:\n\n{e}",
+                "Backup Error"
+            )
+
+    def _view_backup_status(self):
+        """View backup status"""
+        try:
+            backup_mgr = self._get_backup_manager()
+
+            self.ui.show_infobox("Loading backup status...")
+
+            # Get status for all services
+            status = backup_mgr.get_backup_status()
+
+            # Format status information
+            info_lines = ["Backup Status Report", "=" * 60, ""]
+
+            for service, data in status.items():
+                info_lines.append(f"{service.upper()}:")
+                info_lines.append(f"  Repository: {data['repository']}")
+                info_lines.append(f"  Total Backups: {data['backup_count']}")
+
+                if data['latest_backup']:
+                    info_lines.append(f"  Latest: {data['latest_backup']}")
+                else:
+                    info_lines.append("  Latest: No backups found")
+
+                info_lines.append("")
+
+            self.ui.show_scrollable_text(
+                "\n".join(info_lines),
+                "Backup Status"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get backup status: {e}", exc_info=True)
+            self.ui.show_error(
+                f"Failed to retrieve backup status:\n\n{e}",
+                "Error"
+            )
+
+    def _configure_backup_schedule(self):
+        """Configure backup schedule"""
+        self.ui.show_info(
+            "This feature will be implemented in Phase 6.\n\n"
+            "It will allow you to configure automated backup schedules.",
+            "Coming Soon"
+        )
+
+    def _restore_nginx(self):
+        """Restore nginx from backup"""
+        try:
+            restore_mgr = self._get_restore_manager()
+
+            # Get list of backups
+            backups = restore_mgr.list_remote_backups('nginx')
+
+            if not backups:
+                self.ui.show_error(
+                    "No nginx backups found on the remote server.",
+                    "No Backups"
+                )
+                return
+
+            # Let user select backup
+            backup_items = [(b['name'], b['name']) for b in backups]
+            selected_backup = self.ui.select_from_list(
+                backup_items,
+                title="Select nginx Backup",
+                text="Choose a backup to restore:"
+            )
+
+            if not selected_backup:
+                return
+
+            # Confirm restore
+            if not self.ui.confirm_action(
+                f"This will restore nginx Proxy Manager from backup:\n\n"
+                f"{selected_backup}\n\n"
+                "WARNING: This will stop nginx and replace the current installation.\n"
+                "The existing installation will be backed up first.\n\n"
+                "Continue?",
+                "Confirm Restore"
+            ):
+                return
+
+            # Show progress
+            self.ui.show_infobox(
+                "Restoring nginx from backup...\n\n"
+                "This may take several minutes.\n"
+                "The existing installation will be backed up first."
+            )
+
+            # Perform restore
+            success = restore_mgr.restore_nginx(selected_backup)
+
+            if success:
+                self.ui.show_success(
+                    "nginx Proxy Manager restored successfully!\n\n"
+                    "Services have been started.\n"
+                    "Please verify nginx is working properly.",
+                    "Restore Complete"
+                )
+            else:
+                self.ui.show_error(
+                    "nginx restore failed.\n\n"
+                    "Please check the logs for details.\n"
+                    "The previous installation backup may still exist.",
+                    "Restore Failed"
+                )
+
+        except Exception as e:
+            logger.error(f"nginx restore error: {e}", exc_info=True)
+            self.ui.show_error(
+                f"An error occurred during nginx restore:\n\n{e}",
+                "Restore Error"
+            )
+
+    def _restore_mailcow(self):
+        """Restore Mailcow from backup"""
+        try:
+            restore_mgr = self._get_restore_manager()
+
+            # Get list of backups
+            backups = restore_mgr.list_remote_backups('mailcow')
+
+            if not backups:
+                self.ui.show_error(
+                    "No Mailcow backups found on the remote server.",
+                    "No Backups"
+                )
+                return
+
+            # Let user select backup
+            backup_items = [(b['name'], b['name']) for b in backups]
+            selected_backup = self.ui.select_from_list(
+                backup_items,
+                title="Select Mailcow Backup",
+                text="Choose a backup to restore:"
+            )
+
+            if not selected_backup:
+                return
+
+            # Confirm restore
+            if not self.ui.confirm_action(
+                f"This will restore Mailcow from backup:\n\n"
+                f"{selected_backup}\n\n"
+                "WARNING: This will stop Mailcow and restore from backup.\n"
+                "This may take 30-60 minutes depending on backup size.\n"
+                "The existing installation will be backed up first.\n\n"
+                "Continue?",
+                "Confirm Restore"
+            ):
+                return
+
+            # Show progress
+            self.ui.show_infobox(
+                "Restoring Mailcow from backup...\n\n"
+                "This will take significant time (30-60 minutes).\n"
+                "Please be patient..."
+            )
+
+            # Perform restore
+            success = restore_mgr.restore_mailcow(selected_backup)
+
+            if success:
+                self.ui.show_success(
+                    "Mailcow restored successfully!\n\n"
+                    "Services have been started.\n\n"
+                    "IMPORTANT:\n"
+                    "- Verify DNS records point to this server\n"
+                    "- Test email sending/receiving\n"
+                    "- Check webmail access",
+                    "Restore Complete"
+                )
+            else:
+                self.ui.show_error(
+                    "Mailcow restore failed.\n\n"
+                    "Please check the logs for details.\n"
+                    "The previous installation backup may still exist.",
+                    "Restore Failed"
+                )
+
+        except Exception as e:
+            logger.error(f"Mailcow restore error: {e}", exc_info=True)
+            self.ui.show_error(
+                f"An error occurred during Mailcow restore:\n\n{e}",
+                "Restore Error"
+            )
+
+    def _restore_scripts(self):
+        """Restore server manager scripts"""
+        try:
+            restore_mgr = self._get_restore_manager()
+
+            # Get list of backups
+            backups = restore_mgr.list_remote_backups('server-manager')
+
+            if not backups:
+                self.ui.show_error(
+                    "No application backups found on the remote server.",
+                    "No Backups"
+                )
+                return
+
+            # Let user select backup
+            backup_items = [(b['name'], b['name']) for b in backups]
+            selected_backup = self.ui.select_from_list(
+                backup_items,
+                title="Select Application Backup",
+                text="Choose a backup to restore:"
+            )
+
+            if not selected_backup:
+                return
+
+            # Confirm restore
+            if not self.ui.confirm_action(
+                f"This will restore the server-manager application from backup:\n\n"
+                f"{selected_backup}\n\n"
+                "WARNING: This will replace the current application.\n"
+                "The existing installation will be backed up first.\n"
+                "You may need to restart the application after restore.\n\n"
+                "Continue?",
+                "Confirm Restore"
+            ):
+                return
+
+            # Show progress
+            self.ui.show_infobox(
+                "Restoring application from backup...\n\n"
+                "This should be quick."
+            )
+
+            # Perform restore
+            success = restore_mgr.restore_application(selected_backup)
+
+            if success:
+                self.ui.show_success(
+                    "Application restored successfully!\n\n"
+                    "Configuration, logs, and code have been restored.\n\n"
+                    "NOTE: You may need to restart the application\n"
+                    "for changes to take effect.",
+                    "Restore Complete"
+                )
+            else:
+                self.ui.show_error(
+                    "Application restore failed.\n\n"
+                    "Please check the logs for details.",
+                    "Restore Failed"
+                )
+
+        except Exception as e:
+            logger.error(f"Application restore error: {e}", exc_info=True)
+            self.ui.show_error(
+                f"An error occurred during application restore:\n\n{e}",
+                "Restore Error"
+            )
+
+    def _list_backups(self):
+        """List available backups"""
+        try:
+            restore_mgr = self._get_restore_manager()
+
+            self.ui.show_infobox("Loading backup list...")
+
+            # Get backups for all services
+            info_lines = ["Available Backups", "=" * 60, ""]
+
+            for service in ['nginx', 'mailcow', 'server-manager']:
+                backups = restore_mgr.list_remote_backups(service)
+
+                info_lines.append(f"{service.upper()}:")
+                if backups:
+                    for backup in backups:
+                        info_lines.append(f"  - {backup['name']}")
+                else:
+                    info_lines.append("  No backups found")
+
+                info_lines.append("")
+
+            self.ui.show_scrollable_text(
+                "\n".join(info_lines),
+                "Available Backups"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to list backups: {e}", exc_info=True)
+            self.ui.show_error(
+                f"Failed to list backups:\n\n{e}",
+                "Error"
+            )
+
+    def _install_docker(self):
+        """Install Docker"""
+        if not self.ui.confirm_action(
+            "This will install Docker Engine and Docker Compose.\n\n"
+            "The installation may take 5-10 minutes.\n\n"
+            "Continue?",
+            "Install Docker"
+        ):
+            return
+
+        try:
+            install_mgr = self._get_installation_manager()
+
+            self.ui.show_infobox("Installing Docker and Docker Compose...\n\nThis may take several minutes.")
+
+            success = install_mgr.install_docker()
+
+            if success:
+                self.ui.show_success(
+                    "Docker installed successfully!\n\n"
+                    "Docker Engine and Docker Compose are now available."
+                )
+                logger.info("Docker installation completed via TUI")
+            else:
+                self.ui.show_error("Docker installation failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Docker installation error: {e}")
+            self.ui.show_error(f"Installation failed:\n\n{e}")
+
+    def _install_mailcow(self):
+        """Install Mailcow"""
+        # Get domain name from user
+        code, domain = self.ui.d.inputbox(
+            "Enter the primary domain for Mailcow\n"
+            "(e.g., mail.example.com):",
+            title="Mailcow Domain",
+            width=60
+        )
+
+        if code != self.ui.d.OK or not domain:
+            return
+
+        # Get timezone
+        code, timezone = self.ui.d.inputbox(
+            "Enter timezone for Mailcow\n"
+            "(e.g., America/New_York, Europe/London):",
+            title="Mailcow Timezone",
+            init="America/New_York",
+            width=60
+        )
+
+        if code != self.ui.d.OK or not timezone:
+            timezone = "America/New_York"
+
+        if not self.ui.confirm_action(
+            f"This will install Mailcow with:\n\n"
+            f"Domain: {domain}\n"
+            f"Timezone: {timezone}\n\n"
+            "The installation may take 20-30 minutes.\n\n"
+            "Prerequisites:\n"
+            "  • Docker must be installed\n"
+            "  • At least 20GB free disk space\n"
+            "  • At least 4GB RAM\n"
+            "  • Ports 25,80,110,143,443,465,587,993,995 available\n\n"
+            "Continue?",
+            "Install Mailcow"
+        ):
+            return
+
+        try:
+            install_mgr = self._get_installation_manager()
+
+            self.ui.show_infobox(
+                f"Installing Mailcow for {domain}...\n\n"
+                "This will take 20-30 minutes.\n"
+                "Please be patient..."
+            )
+
+            success = install_mgr.install_mailcow(domain, timezone)
+
+            if success:
+                self.ui.show_success(
+                    f"Mailcow installed successfully!\n\n"
+                    f"Domain: {domain}\n"
+                    f"Admin UI: https://{domain}\n"
+                    f"Default login: admin / moohoo\n\n"
+                    "IMPORTANT: Configure DNS records before using!\n"
+                    "See logs for DNS configuration details."
+                )
+                logger.info(f"Mailcow installation completed via TUI for {domain}")
+            else:
+                self.ui.show_error("Mailcow installation failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Mailcow installation error: {e}")
+            self.ui.show_error(f"Installation failed:\n\n{e}")
+
+    def _install_nginx(self):
+        """Install nginx Proxy Manager"""
+        if not self.ui.confirm_action(
+            "This will install nginx Proxy Manager.\n\n"
+            "Prerequisites:\n"
+            "  • Docker must be installed\n"
+            "  • Ports 80, 81, and 443 must be available\n\n"
+            "Installation time: ~5 minutes\n\n"
+            "Default access:\n"
+            "  URL: http://YOUR_IP:81\n"
+            "  Login: admin@example.com / changeme\n\n"
+            "Continue?",
+            "Install nginx Proxy Manager"
+        ):
+            return
+
+        try:
+            install_mgr = self._get_installation_manager()
+
+            self.ui.show_infobox("Installing nginx Proxy Manager...\n\nThis may take a few minutes.")
+
+            success = install_mgr.install_nginx_proxy_manager()
+
+            if success:
+                hostname = get_hostname()
+                self.ui.show_success(
+                    "nginx Proxy Manager installed successfully!\n\n"
+                    f"Access at: http://{hostname}:81\n\n"
+                    "Default login:\n"
+                    "  Email: admin@example.com\n"
+                    "  Password: changeme\n\n"
+                    "IMPORTANT: Change the default password!"
+                )
+                logger.info("nginx Proxy Manager installation completed via TUI")
+            else:
+                self.ui.show_error("nginx installation failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"nginx installation error: {e}")
+            self.ui.show_error(f"Installation failed:\n\n{e}")
+
+    def _install_portainer(self):
+        """Install Portainer"""
+        self.ui.show_info(
+            "This feature will be implemented in Phase 4.\n\n"
+            "It will install Portainer for Docker management.",
+            "Coming Soon"
+        )
+
+    def _check_prerequisites(self):
+        """Check system prerequisites"""
+        from lib.utils import run_command, check_disk_space
+
+        info = []
+        info.append("System Prerequisites Check")
+        info.append("=" * 50)
+        info.append("")
+
+        # Check disk space
+        info.append("Disk Space:")
+        has_space = check_disk_space("/", 10)
+        info.append(f"  Root partition: {'OK (>10GB free)' if has_space else 'WARNING (low disk space)'}")
+        info.append("")
+
+        # Check Docker
+        info.append("Docker:")
+        try:
+            run_command(["docker", "--version"], check=True)
+            info.append("  Docker: Installed")
+        except:
+            info.append("  Docker: NOT INSTALLED")
+
+        try:
+            run_command(["docker", "compose", "version"], check=True)
+            info.append("  Docker Compose: Installed")
+        except:
+            info.append("  Docker Compose: NOT INSTALLED")
+
+        info.append("")
+
+        # Check SSH
+        info.append("SSH:")
+        ssh_key = self.config.get('rsync.ssh_key')
+        if os.path.exists(ssh_key):
+            info.append(f"  SSH Key: Found ({ssh_key})")
+        else:
+            info.append(f"  SSH Key: NOT FOUND ({ssh_key})")
+
+        info.append("")
+
+        # Check Borg passphrase
+        info.append("Backup Configuration:")
+        passphrase = self.config.get_secret('BORG_PASSPHRASE')
+        if passphrase:
+            info.append("  BORG_PASSPHRASE: Set")
+        else:
+            info.append("  BORG_PASSPHRASE: NOT SET")
+
+        self.ui.show_scrollable_text("\n".join(info), "Prerequisites Check")
+
+    def _disable_ipv6(self):
+        """Disable IPv6"""
+        try:
+            sys_config_mgr = self._get_system_config_manager()
+
+            # Check current status
+            status = sys_config_mgr.check_ipv6_status()
+
+            if status['grub_disabled']:
+                self.ui.show_info(
+                    "IPv6 is already disabled in GRUB configuration.\n\n"
+                    "If IPv6 is still active, a reboot is required.",
+                    "IPv6 Already Disabled"
+                )
+                return
+
+            if not self.ui.confirm_action(
+                "This will disable IPv6 by modifying GRUB configuration.\n\n"
+                "A backup of /etc/default/grub will be created.\n\n"
+                "WARNING: A system reboot will be required for this change to take effect!\n\n"
+                "Continue?",
+                "Disable IPv6"
+            ):
+                return
+
+            self.ui.show_infobox("Disabling IPv6 via GRUB...\n\nPlease wait...")
+
+            success = sys_config_mgr.disable_ipv6()
+
+            if success:
+                if self.ui.confirm_action(
+                    "IPv6 has been disabled in GRUB configuration.\n\n"
+                    "A system reboot is required for the change to take effect.\n\n"
+                    "Do you want to reboot now?",
+                    "Reboot Required"
+                ):
+                    logger.info("Rebooting system to apply IPv6 disable")
+                    self.ui.show_infobox("Rebooting system...")
+                    import time
+                    time.sleep(2)
+                    os.system("reboot")
+                else:
+                    self.ui.show_info(
+                        "IPv6 disabled in GRUB.\n\n"
+                        "Please reboot manually for changes to take effect:\n"
+                        "  sudo reboot",
+                        "Reboot Required"
+                    )
+            else:
+                self.ui.show_error("Failed to disable IPv6. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"IPv6 disable error: {e}")
+            self.ui.show_error(f"Failed to disable IPv6:\n\n{e}")
+
+    def _enable_ipv6(self):
+        """Enable IPv6"""
+        try:
+            sys_config_mgr = self._get_system_config_manager()
+
+            # Check current status
+            status = sys_config_mgr.check_ipv6_status()
+
+            if not status['grub_disabled']:
+                self.ui.show_info(
+                    "IPv6 is already enabled in GRUB configuration.\n\n"
+                    "If IPv6 is not working, check your network configuration.",
+                    "IPv6 Already Enabled"
+                )
+                return
+
+            if not self.ui.confirm_action(
+                "This will enable IPv6 by modifying GRUB configuration.\n\n"
+                "A backup of /etc/default/grub will be created.\n\n"
+                "WARNING: A system reboot will be required for this change to take effect!\n\n"
+                "Continue?",
+                "Enable IPv6"
+            ):
+                return
+
+            self.ui.show_infobox("Enabling IPv6 via GRUB...\n\nPlease wait...")
+
+            success = sys_config_mgr.enable_ipv6()
+
+            if success:
+                if self.ui.confirm_action(
+                    "IPv6 has been enabled in GRUB configuration.\n\n"
+                    "A system reboot is required for the change to take effect.\n\n"
+                    "Do you want to reboot now?",
+                    "Reboot Required"
+                ):
+                    logger.info("Rebooting system to apply IPv6 enable")
+                    self.ui.show_infobox("Rebooting system...")
+                    import time
+                    time.sleep(2)
+                    os.system("reboot")
+                else:
+                    self.ui.show_info(
+                        "IPv6 enabled in GRUB.\n\n"
+                        "Please reboot manually for changes to take effect:\n"
+                        "  sudo reboot",
+                        "Reboot Required"
+                    )
+            else:
+                self.ui.show_error("Failed to enable IPv6. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"IPv6 enable error: {e}")
+            self.ui.show_error(f"Failed to enable IPv6:\n\n{e}")
+
+    def _configure_firewall(self):
+        """Configure firewall"""
+        try:
+            sys_config_mgr = self._get_system_config_manager()
+
+            # Check current status
+            status = sys_config_mgr.check_firewall_status()
+
+            # Show preset selection
+            presets = [
+                ("mailcow", "Mailcow (SSH, HTTP, HTTPS, SMTP, IMAP, POP3)"),
+                ("nginx", "nginx Proxy Manager (SSH, HTTP, HTTPS, nginx Admin)"),
+                ("basic", "Basic Web Server (SSH, HTTP, HTTPS)"),
+                ("custom", "Custom (manual configuration)")
+            ]
+
+            code, preset = self.ui.d.menu(
+                "Select firewall preset:\n\n"
+                "This will configure UFW (Uncomplicated Firewall) with appropriate rules.\n\n"
+                f"Current status: {'Active' if status['ufw_active'] else 'Inactive'}",
+                title="Firewall Configuration",
+                choices=presets,
+                width=70,
+                height=20
+            )
+
+            if code != self.ui.d.OK:
+                return
+
+            if preset == "custom":
+                self.ui.show_info(
+                    "Custom firewall configuration:\n\n"
+                    "Use the following commands to configure manually:\n"
+                    "  ufw allow <port>/<protocol>\n"
+                    "  ufw status\n"
+                    "  ufw enable",
+                    "Custom Configuration"
+                )
+                return
+
+            # Get preset description
+            preset_desc = {
+                'mailcow': 'SSH, HTTP, HTTPS, SMTP, IMAP, POP3, and mail-related ports',
+                'nginx': 'SSH, HTTP, HTTPS, and nginx admin interface (port 81)',
+                'basic': 'SSH, HTTP, and HTTPS only'
+            }
+
+            if not self.ui.confirm_action(
+                f"This will configure the firewall with the '{preset}' preset.\n\n"
+                f"Ports to be allowed:\n  {preset_desc.get(preset, 'Unknown')}\n\n"
+                "WARNING: This will reset existing firewall rules!\n\n"
+                "SSH (port 22) will always be allowed to prevent lockout.\n\n"
+                "Continue?",
+                "Configure Firewall"
+            ):
+                return
+
+            self.ui.show_infobox(f"Configuring firewall with {preset} preset...\n\nPlease wait...")
+
+            success = sys_config_mgr.configure_firewall(preset)
+
+            if success:
+                self.ui.show_success(
+                    f"Firewall configured successfully with '{preset}' preset!\n\n"
+                    "Firewall is now active and enabled on boot.\n\n"
+                    "To view rules: sudo ufw status verbose"
+                )
+                logger.info(f"Firewall configured with {preset} preset via TUI")
+            else:
+                self.ui.show_error("Firewall configuration failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Firewall configuration error: {e}")
+            self.ui.show_error(f"Failed to configure firewall:\n\n{e}")
+
+    def _network_settings(self):
+        """Show network settings"""
+        self.ui.show_info(
+            "This feature will be implemented in Phase 4.\n\n"
+            "It will show and configure network settings.",
+            "Coming Soon"
+        )
+
+    def _system_information(self):
+        """Show system information"""
+        from lib.utils import run_command, format_bytes
+        import shutil
+
+        info = []
+        info.append("System Information")
+        info.append("=" * 50)
+        info.append("")
+
+        # Hostname and IP
+        hostname = get_hostname()
+        ip = get_ip_address()
+        info.append(f"Hostname: {hostname}")
+        info.append(f"IP Address: {ip}")
+        info.append("")
+
+        # OS info
+        try:
+            code, stdout, stderr = run_command(["lsb_release", "-d"], check=False)
+            if code == 0:
+                info.append(stdout.strip())
+        except:
+            pass
+
+        # Kernel
+        try:
+            code, stdout, stderr = run_command(["uname", "-r"], check=False)
+            if code == 0:
+                info.append(f"Kernel: {stdout.strip()}")
+        except:
+            pass
+
+        info.append("")
+
+        # Disk usage
+        info.append("Disk Usage:")
+        stat = shutil.disk_usage("/")
+        info.append(f"  Total: {format_bytes(stat.total)}")
+        info.append(f"  Used: {format_bytes(stat.used)}")
+        info.append(f"  Free: {format_bytes(stat.free)}")
+        info.append(f"  Usage: {(stat.used / stat.total * 100):.1f}%")
+
+        self.ui.show_scrollable_text("\n".join(info), "System Information")
+
+    def _update_nginx(self):
+        """Update nginx"""
+        if not self.ui.confirm_action(
+            "This will update nginx Proxy Manager to the latest version.\n\n"
+            "A backup will be created automatically before the update.\n\n"
+            "The update process:\n"
+            "  1. Create pre-update backup\n"
+            "  2. Pull latest image\n"
+            "  3. Restart containers\n"
+            "  4. Verify service is running\n\n"
+            "Continue?",
+            "Update nginx Proxy Manager"
+        ):
+            return
+
+        try:
+            maint_mgr = self._get_maintenance_manager()
+
+            self.ui.show_infobox("Updating nginx Proxy Manager...\n\nPlease wait...")
+
+            success = maint_mgr.update_nginx(backup_first=True)
+
+            if success:
+                self.ui.show_success(
+                    "nginx Proxy Manager updated successfully!\n\n"
+                    "A pre-update backup was created.\n"
+                    "Service is running with the latest version."
+                )
+                logger.info("nginx update completed via TUI")
+            else:
+                if self.ui.confirm_action(
+                    "nginx update failed!\n\n"
+                    "Do you want to rollback to the previous version?",
+                    "Update Failed"
+                ):
+                    self.ui.show_infobox("Rolling back nginx...\n\nPlease wait...")
+                    backup_path = maint_mgr.rollback_nginx()
+                    if backup_path:
+                        self.ui.show_success(f"Rollback successful!\n\nRestored from: {backup_path}")
+                    else:
+                        self.ui.show_error("Rollback failed. Check logs for details.")
+                else:
+                    self.ui.show_error("Update failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"nginx update error: {e}")
+            self.ui.show_error(f"Update failed:\n\n{e}")
+
+    def _update_mailcow(self):
+        """Update Mailcow"""
+        if not self.ui.confirm_action(
+            "This will update Mailcow using the official update script.\n\n"
+            "WARNING: This may take 10-20 minutes!\n\n"
+            "The update script will:\n"
+            "  • Update Docker images\n"
+            "  • Update Mailcow configuration\n"
+            "  • Restart services\n"
+            "  • Run database migrations\n\n"
+            "Mailcow will be temporarily unavailable during the update.\n\n"
+            "Continue?",
+            "Update Mailcow"
+        ):
+            return
+
+        try:
+            maint_mgr = self._get_maintenance_manager()
+
+            self.ui.show_infobox(
+                "Updating Mailcow...\n\n"
+                "This may take 10-20 minutes.\n"
+                "Please be patient..."
+            )
+
+            success = maint_mgr.update_mailcow()
+
+            if success:
+                self.ui.show_success(
+                    "Mailcow updated successfully!\n\n"
+                    "All services have been restarted.\n"
+                    "Check logs for detailed update information."
+                )
+                logger.info("Mailcow update completed via TUI")
+            else:
+                self.ui.show_error(
+                    "Mailcow update failed!\n\n"
+                    "Check logs for details.\n\n"
+                    "The system may be in an inconsistent state.\n"
+                    "You may need to restore from backup."
+                )
+
+        except Exception as e:
+            logger.error(f"Mailcow update error: {e}")
+            self.ui.show_error(f"Update failed:\n\n{e}")
+
+    def _update_system(self):
+        """Update system packages"""
+        # Show update type selection
+        choices = [
+            ("all", "All packages (full system upgrade)"),
+            ("security", "Security updates only")
+        ]
+
+        code, update_type = self.ui.d.menu(
+            "Select update type:\n\n"
+            "Full upgrade may update kernel and require reboot.\n"
+            "Security updates are safer for production systems.",
+            title="System Update Type",
+            choices=choices,
+            width=60,
+            height=12
+        )
+
+        if code != self.ui.d.OK:
+            return
+
+        security_only = (update_type == "security")
+
+        if not self.ui.confirm_action(
+            f"This will update system packages ({update_type}).\n\n"
+            "The process includes:\n"
+            "  • apt-get update\n"
+            f"  • {'Security updates only' if security_only else 'Full package upgrade'}\n"
+            "  • Remove unnecessary packages\n"
+            "  • Clean package cache\n\n"
+            "This may take 10-30 minutes.\n\n"
+            "Continue?",
+            "Update System"
+        ):
+            return
+
+        try:
+            maint_mgr = self._get_maintenance_manager()
+
+            self.ui.show_infobox(
+                "Updating system packages...\n\n"
+                "This may take 10-30 minutes.\n"
+                "Please be patient..."
+            )
+
+            success = maint_mgr.update_system_packages(security_only=security_only)
+
+            if success:
+                self.ui.show_success(
+                    "System packages updated successfully!\n\n"
+                    "Check if a reboot is required:\n"
+                    "  • /var/run/reboot-required file exists\n"
+                    "  • Kernel updated\n\n"
+                    "To reboot: System Configuration → Reboot System"
+                )
+                logger.info(f"System update completed via TUI (security_only={security_only})")
+            else:
+                self.ui.show_error("System update failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"System update error: {e}")
+            self.ui.show_error(f"Update failed:\n\n{e}")
+
+    def _cleanup_backups(self):
+        """Cleanup old backups"""
+        self.ui.show_info(
+            "This feature will be implemented in Phase 5.\n\n"
+            "It will remove old backups based on retention policy.",
+            "Coming Soon"
+        )
+
+    def _cleanup_docker(self):
+        """Cleanup Docker"""
+        if not self.ui.confirm_action(
+            "This will cleanup unused Docker resources:\n\n"
+            "  • Stopped containers\n"
+            "  • Unused images\n"
+            "  • Unused volumes\n"
+            "  • Unused networks\n\n"
+            "WARNING: This cannot be undone!\n\n"
+            "Only resources not used by any container will be removed.\n\n"
+            "Continue?",
+            "Cleanup Docker"
+        ):
+            return
+
+        try:
+            maint_mgr = self._get_maintenance_manager()
+
+            self.ui.show_infobox("Cleaning up Docker resources...\n\nPlease wait...")
+
+            stats = maint_mgr.cleanup_docker()
+
+            if stats['success']:
+                self.ui.show_success(
+                    "Docker cleanup completed!\n\n"
+                    f"Space freed: {stats['space_freed']}\n\n"
+                    "Removed:\n"
+                    f"  • {stats['containers_removed']} stopped containers\n"
+                    f"  • {stats['volumes_removed']} unused volumes\n"
+                    f"  • Unused images\n"
+                    f"  • Unused networks"
+                )
+                logger.info(f"Docker cleanup completed via TUI: {stats['space_freed']} freed")
+            else:
+                self.ui.show_error("Docker cleanup failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Docker cleanup error: {e}")
+            self.ui.show_error(f"Cleanup failed:\n\n{e}")
+
+    def _service_status(self):
+        """Show service status"""
+        try:
+            mon_mgr = self._get_monitoring_manager()
+
+            # Get status for all services
+            all_status = mon_mgr.get_all_services_status()
+
+            # Build status text
+            status_text = "Service Status\n"
+            status_text += "=" * 60 + "\n\n"
+
+            for service_name, status in all_status.items():
+                status_text += f"{service_name.upper()}:\n"
+
+                if not status['installed']:
+                    status_text += "  Status: Not Installed\n"
+                    if status['error']:
+                        status_text += f"  Error: {status['error']}\n"
+                elif status['running']:
+                    status_text += "  Status: ✓ Running\n"
+                    status_text += f"  Containers: {len(status['containers'])}\n"
+                    for container in status['containers']:
+                        state_icon = "✓" if container['state'] == 'running' else "✗"
+                        status_text += f"    {state_icon} {container['name']}: {container['status']}\n"
+                else:
+                    status_text += "  Status: ✗ Not Running\n"
+                    if status['error']:
+                        status_text += f"  Error: {status['error']}\n"
+
+                status_text += "\n"
+
+            self.ui.show_scrollable_text(status_text, "Service Status")
+
+        except Exception as e:
+            logger.error(f"Service status error: {e}")
+            self.ui.show_error(f"Failed to get service status:\n\n{e}")
+
+    def _disk_usage(self):
+        """Show disk usage"""
+        from lib.utils import format_bytes
+        import shutil
+
+        info = []
+        info.append("Disk Usage Report")
+        info.append("=" * 50)
+        info.append("")
+
+        # Root partition
+        stat = shutil.disk_usage("/")
+        info.append("Root Partition (/):")
+        info.append(f"  Total: {format_bytes(stat.total)}")
+        info.append(f"  Used: {format_bytes(stat.used)}")
+        info.append(f"  Free: {format_bytes(stat.free)}")
+        info.append(f"  Usage: {(stat.used / stat.total * 100):.1f}%")
+        info.append("")
+
+        # Backup staging area
+        backup_path = self.config.get('backup.local_staging', '/var/backups/local')
+        if os.path.exists(backup_path):
+            stat = shutil.disk_usage(backup_path)
+            info.append(f"Backup Staging ({backup_path}):")
+            info.append(f"  Free: {format_bytes(stat.free)}")
+
+        self.ui.show_scrollable_text("\n".join(info), "Disk Usage")
+
+    def _backup_history(self):
+        """Show backup history"""
+        self.ui.show_info(
+            "This feature will be implemented in Phase 5.\n\n"
+            "It will show the history of backups.",
+            "Coming Soon"
+        )
+
+    def _container_stats(self):
+        """Show container statistics"""
+        try:
+            mon_mgr = self._get_monitoring_manager()
+
+            # Get stats for all containers
+            stats = mon_mgr.get_container_stats()
+
+            if not stats:
+                self.ui.show_info(
+                    "No running containers found.\n\n"
+                    "Start some services first:\n"
+                    "  • nginx Proxy Manager\n"
+                    "  • Mailcow",
+                    "No Containers"
+                )
+                return
+
+            # Build stats text
+            stats_text = "Container Resource Usage\n"
+            stats_text += "=" * 80 + "\n\n"
+
+            for container in stats:
+                stats_text += f"Container: {container['name']}\n"
+                stats_text += f"  CPU:     {container['cpu_percent']}\n"
+                stats_text += f"  Memory:  {container['memory_usage']} ({container['memory_percent']})\n"
+                stats_text += f"  Network: {container['net_io']}\n"
+                stats_text += f"  Disk I/O: {container['block_io']}\n"
+                stats_text += f"  PIDs:    {container['pids']}\n"
+                stats_text += "\n"
+
+            self.ui.show_scrollable_text(stats_text, "Container Statistics")
+
+        except Exception as e:
+            logger.error(f"Container stats error: {e}")
+            self.ui.show_error(f"Failed to get container statistics:\n\n{e}")
+
+    def _view_logs(self):
+        """View application logs"""
+        log_file = "/opt/server-manager/logs/server-manager.log"
+
+        if os.path.exists(log_file):
+            self.ui.show_text_file(log_file, "Application Logs")
+        else:
+            self.ui.show_error("Log file not found", "Error")
+
+    def _configure_rsync(self):
+        """Configure rsync server settings"""
+        self.ui.show_info(
+            "This feature will be implemented in Phase 5.\n\n"
+            "It will allow you to configure rsync server settings.",
+            "Coming Soon"
+        )
+
+    def _set_retention(self):
+        """Set backup retention policy"""
+        self.ui.show_info(
+            "This feature will be implemented in Phase 5.\n\n"
+            "It will allow you to configure backup retention policies.",
+            "Coming Soon"
+        )
+
+    def _notification_settings(self):
+        """Configure notification settings"""
+        self.ui.show_info(
+            "This feature will be implemented in Phase 5.\n\n"
+            "It will allow you to configure email notifications.",
+            "Coming Soon"
+        )
+
+    def _view_configuration(self):
+        """View current configuration"""
+        import yaml
+
+        config_text = yaml.dump(self.config.config, default_flow_style=False, sort_keys=False)
+
+        self.ui.show_scrollable_text(
+            config_text,
+            "Current Configuration"
+        )
+
+    def _edit_configuration(self):
+        """Edit configuration file"""
+        config_path = self.config.config_path
+
+        self.ui.show_info(
+            f"Configuration file location:\n{config_path}\n\n"
+            "Please edit this file manually using your preferred editor.\n\n"
+            "After editing, restart the application to load changes.",
+            "Edit Configuration"
+        )
+
+
+def main():
+    """Main entry point"""
+    try:
+        app = ServerManager()
+        app.run()
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

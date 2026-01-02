@@ -1,0 +1,44 @@
+# Server Manager Configuration
+# Copy this file to settings.yaml and customize for your environment
+
+# Rsync backup server configuration
+rsync:
+  host: rsync-backup              # Hostname or IP of rsync server
+  user: root                       # SSH user for rsync server
+  base_path: /backups              # Base path on rsync server for backups
+  ssh_key: /root/.ssh/backup_key   # Path to SSH private key for authentication
+
+# Borg backup configuration
+borg:
+  remote_path: borg14              # Borg binary name on remote server
+  compression: zstd,3              # Compression algorithm and level
+  retention:
+    daily: 7                       # Keep 7 daily backups
+    weekly: 4                      # Keep 4 weekly backups
+    monthly: 6                     # Keep 6 monthly backups
+
+# Mailcow configuration
+mailcow:
+  install_path: /opt/mailcow-dockerized    # Installation directory
+  backup_types:                            # Types of backups to create
+    - all                                  # Options: all, config, mail, db
+  domain: mail.example.com                 # Mailcow domain
+
+# Nginx Proxy Manager configuration
+nginx:
+  install_path: /root/nginx        # Installation directory
+  domain: nginx.example.com        # Admin interface domain
+
+# System configuration
+system:
+  ipv6_enabled: false              # IPv6 state (managed by this application)
+  auto_updates: false              # Enable automatic system updates
+  notification_email: null         # Email for notifications (optional)
+
+# Backup configuration
+backup:
+  local_staging: /var/backups/local    # Local staging area for backups
+  schedule:
+    nginx: "0 2 * * *"             # Cron schedule for nginx backups (2 AM daily)
+    mailcow: "0 3 * * *"           # Cron schedule for mailcow backups (3 AM daily)
+    scripts: "0 4 * * 0"           # Cron schedule for scripts backup (4 AM Sunday)
