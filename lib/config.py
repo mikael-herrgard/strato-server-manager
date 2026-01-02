@@ -225,7 +225,10 @@ class ConfigManager:
         return {
             'install_path': self.get('mailcow.install_path', '/opt/mailcow-dockerized'),
             'backup_types': self.get('mailcow.backup_types', ['all']),
-            'domain': self.get('mailcow.domain', 'mail.example.com')
+            'domain': self.get('mailcow.domain', 'mail.example.com'),
+            'http_port': self.get('mailcow.http_port', 80),
+            'https_port': self.get('mailcow.https_port', 443),
+            'http_redirect': self.get('mailcow.http_redirect', 'y')
         }
 
     def get_nginx_config(self) -> Dict[str, Any]:

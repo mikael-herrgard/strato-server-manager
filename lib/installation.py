@@ -393,6 +393,30 @@ networks:
 
                 logger.info("Configuration generated successfully")
 
+                # Apply custom Mailcow settings to mailcow.conf
+                logger.info("Applying custom Mailcow settings...")
+                mailcow_conf = os.path.join(mailcow_path, 'mailcow.conf')
+
+                # Get custom settings from config
+                http_port = self.mailcow_config.get('http_port', 80)
+                https_port = self.mailcow_config.get('https_port', 443)
+                http_redirect = self.mailcow_config.get('http_redirect', 'y')
+
+                # Read mailcow.conf
+                with open(mailcow_conf, 'r') as f:
+                    conf_content = f.read()
+
+                # Replace default values with custom settings
+                conf_content = conf_content.replace('HTTP_PORT=80', f'HTTP_PORT={http_port}')
+                conf_content = conf_content.replace('HTTPS_PORT=443', f'HTTPS_PORT={https_port}')
+                conf_content = conf_content.replace('HTTP_REDIRECT=y', f'HTTP_REDIRECT={http_redirect}')
+
+                # Write back
+                with open(mailcow_conf, 'w') as f:
+                    f.write(conf_content)
+
+                logger.info(f"Applied custom settings: HTTP_PORT={http_port}, HTTPS_PORT={https_port}, HTTP_REDIRECT={http_redirect}")
+
                 # Pull Docker images (this takes a while)
                 logger.info("Pulling Mailcow Docker images (this may take 10-20 minutes)...")
                 returncode, stdout, stderr = run_command(

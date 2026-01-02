@@ -23,6 +23,9 @@ mailcow:
   backup_types:                            # Types of backups to create
     - all                                  # Options: all, config, mail, db
   domain: mail.example.com                 # Mailcow domain
+  http_port: 80                            # HTTP port (default: 80)
+  https_port: 443                          # HTTPS port (default: 443)
+  http_redirect: "y"                       # HTTP to HTTPS redirect (y/n, default: y)
 
 # Nginx Proxy Manager configuration
 nginx:
