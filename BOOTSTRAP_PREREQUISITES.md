@@ -214,7 +214,7 @@ borg:
 
 **No prerequisites needed!** The bootstrap script uses HTTPS:
 ```bash
-git clone https://github.com/USER/server-manager.git
+git clone https://github.com/mikael-herrgard/strato-server-manager.git
 ```
 
 This works without authentication.

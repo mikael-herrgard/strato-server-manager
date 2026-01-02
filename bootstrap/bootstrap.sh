@@ -7,13 +7,13 @@
 # and creates all necessary directories and symlinks.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | bash
 #
 # Or directly:
 #   ./bootstrap.sh
 #
 # Environment Variables:
-#   GITHUB_REPO   - Git repository URL (default: https://github.com/USER/server-manager.git)
+#   GITHUB_REPO   - Git repository URL (default: https://github.com/mikael-herrgard/strato-server-manager.git)
 #   GITHUB_BRANCH - Git branch to clone (default: main)
 #   SKIP_CONFIRM  - Skip confirmation prompts (default: false)
 #
@@ -34,7 +34,7 @@ LOG_DIR="${INSTALL_DIR}/logs"
 STATE_DIR="${INSTALL_DIR}/state"
 BACKUP_STAGING="/var/backups/local"
 SYMLINK_PATH="/usr/local/bin/server-manager"
-GITHUB_REPO="${GITHUB_REPO:-https://github.com/USER/server-manager.git}"
+GITHUB_REPO="${GITHUB_REPO:-https://github.com/mikael-herrgard/strato-server-manager.git}"
 GITHUB_BRANCH="${GITHUB_BRANCH:-main}"
 LOG_FILE="/tmp/server-manager-bootstrap-$(date +%Y%m%d-%H%M%S).log"
 SKIP_CONFIRM="${SKIP_CONFIRM:-false}"

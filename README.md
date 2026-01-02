@@ -19,7 +19,7 @@ Server Manager provides a unified interface (similar to raspi-config) for managi
 The easiest way to install Server Manager on a fresh VPS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | bash
 ```
 
 This automated installer will:
@@ -254,7 +254,7 @@ If your VPS fails and you need to rebuild:
 #### 2. Run Bootstrap Installer
 On the fresh VPS, run:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | bash
 ```
 
 The installer will:
@@ -347,7 +347,7 @@ This ensures your backups are valid and the process works.
 If you cannot use the bootstrap installer:
 
 1. Install system packages manually (see [bootstrap/README.md](bootstrap/README.md))
-2. Clone repository: `git clone https://github.com/USER/server-manager.git /opt/server-manager`
+2. Clone repository: `git clone https://github.com/mikael-herrgard/strato-server-manager.git /opt/server-manager`
 3. Create venv: `cd /opt/server-manager && python3 -m venv venv`
 4. Install dependencies: `venv/bin/pip install -r requirements.txt`
 5. Copy configuration from backup server
@@ -393,7 +393,7 @@ Your backup server (rsync/Borg target) should:
 
 For fully automated recovery (coming in Phase 7):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | \
   SKIP_CONFIRM=true AUTO_RESTORE=true bash
 ```
 

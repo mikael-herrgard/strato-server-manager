@@ -7,7 +7,7 @@ Automated installation system for deploying Server Manager to fresh VPS instance
 **For Ubuntu 20.04+ / Debian 11+ servers:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | bash
 ```
 
 This single command will download and execute the complete installation process.
@@ -90,35 +90,35 @@ If copying configuration from an existing server:
 
 ### Standard Installation
 ```bash
-curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | bash
 ```
 
 ### Install from Development Branch
 ```bash
-BRANCH=development curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/install.sh | bash
+BRANCH=development curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | bash
 ```
 
 ### Install from Custom Repository
 ```bash
 GITHUB_REPO=https://github.com/youruser/server-manager.git \
-curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | bash
 ```
 
 ### Non-Interactive Installation
 ```bash
-SKIP_CONFIRM=true curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/install.sh | bash
+SKIP_CONFIRM=true curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | bash
 ```
 
 ### Download and Inspect Before Running
 ```bash
 # Download initiator
-curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh -o install.sh
 
 # Review the script
 cat install.sh
 
 # Download main bootstrap
-curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/bootstrap.sh -o bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/bootstrap.sh -o bootstrap.sh
 
 # Review the bootstrap
 less bootstrap.sh
@@ -192,7 +192,7 @@ apt-get update
 apt-get upgrade
 
 # Re-run bootstrap:
-curl -fsSL https://raw.githubusercontent.com/USER/server-manager/main/bootstrap/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | bash
 ```
 
 ### Git Clone Fails
@@ -312,7 +312,7 @@ For servers without direct internet access:
 
 1. Download on a connected machine:
 ```bash
-git clone https://github.com/USER/server-manager.git
+git clone https://github.com/mikael-herrgard/strato-server-manager.git
 cd server-manager
 pip download -r requirements.txt -d deps/
 ```

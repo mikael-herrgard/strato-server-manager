@@ -328,11 +328,9 @@ Before production use:
 
 ## Known Limitations
 
-1. **GitHub Repository URL:** Scripts use placeholder "USER/server-manager" - must be updated with actual repository
-2. **No Automated Restore:** Currently requires manual TUI navigation to restore services
-3. **No Rollback:** If installation fails partway, must clean up and re-run
-4. **SSH Key Required:** Configuration copy requires pre-configured SSH authentication
-5. **Single Backup Server:** Only supports one rsync/backup server
+1. **No Automated Restore:** Currently requires manual TUI navigation to restore services
+2. **No Rollback:** If installation fails partway, must clean up and re-run
+3. **Single Backup Server:** Only supports one rsync/backup server
 
 ## Success Criteria Met
 
