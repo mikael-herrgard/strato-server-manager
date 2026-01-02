@@ -134,8 +134,8 @@ class ServerManagerUI:
         """
         menu_items = [
             ("1", "Install Docker"),
-            ("2", "Install Mailcow"),
-            ("3", "Install nginx Proxy Manager"),
+            ("2", "Install nginx Proxy Manager"),
+            ("3", "Install Mailcow"),
             ("4", "Install Portainer"),
             ("5", "Check Prerequisites"),
             ("0", "Back to Main Menu")
@@ -165,9 +165,7 @@ class ServerManagerUI:
         menu_items = [
             ("1", "Disable IPv6"),
             ("2", "Enable IPv6"),
-            ("3", "Configure Firewall"),
-            ("4", "Network Settings"),
-            ("5", "System Information"),
+            ("3", "System Information"),
             ("0", "Back to Main Menu")
         ]
 
@@ -196,8 +194,7 @@ class ServerManagerUI:
             ("1", "Update nginx Proxy Manager"),
             ("2", "Update Mailcow"),
             ("3", "Update System Packages"),
-            ("4", "Cleanup Old Backups"),
-            ("5", "Cleanup Docker"),
+            ("4", "Cleanup Docker"),
             ("0", "Back to Main Menu")
         ]
 
@@ -225,9 +222,8 @@ class ServerManagerUI:
         menu_items = [
             ("1", "Service Status"),
             ("2", "Disk Usage"),
-            ("3", "Backup History"),
-            ("4", "Container Stats"),
-            ("5", "View Logs"),
+            ("3", "Container Stats"),
+            ("4", "View Logs"),
             ("0", "Back to Main Menu")
         ]
 
@@ -253,11 +249,9 @@ class ServerManagerUI:
             Selected menu code or 'back'
         """
         menu_items = [
-            ("1", "Configure Rsync Server"),
-            ("2", "Set Backup Retention"),
-            ("3", "Notification Settings"),
-            ("4", "View Configuration"),
-            ("5", "Edit Configuration File"),
+            ("1", "Notification Settings"),
+            ("2", "View Configuration"),
+            ("3", "Edit Configuration File"),
             ("0", "Back to Main Menu")
         ]
 

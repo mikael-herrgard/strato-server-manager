@@ -274,9 +274,9 @@ For help, see: /opt/server-manager/README.md
             if choice == "1":
                 self.installation_handlers.handle_install_docker()
             elif choice == "2":
-                self.installation_handlers.handle_install_mailcow()
-            elif choice == "3":
                 self.installation_handlers.handle_install_nginx()
+            elif choice == "3":
+                self.installation_handlers.handle_install_mailcow()
             elif choice == "4":
                 self._install_portainer_placeholder()
             elif choice == "5":
@@ -294,10 +294,6 @@ For help, see: /opt/server-manager/README.md
             elif choice == "2":
                 self.system_handlers.handle_enable_ipv6()
             elif choice == "3":
-                self.system_handlers.handle_configure_firewall()
-            elif choice == "4":
-                self._network_settings_placeholder()
-            elif choice == "5":
                 # System Information - use monitoring handler
                 self.monitoring_handlers.handle_system_info()
             elif choice == "0" or choice == "back":
@@ -315,8 +311,6 @@ For help, see: /opt/server-manager/README.md
             elif choice == "3":
                 self.maintenance_handlers.handle_update_system()
             elif choice == "4":
-                self._cleanup_backups_placeholder()
-            elif choice == "5":
                 self.maintenance_handlers.handle_cleanup_docker()
             elif choice == "0" or choice == "back":
                 break
@@ -331,10 +325,8 @@ For help, see: /opt/server-manager/README.md
             elif choice == "2":
                 self.monitoring_handlers.handle_disk_usage()
             elif choice == "3":
-                self._backup_history_placeholder()
-            elif choice == "4":
                 self.monitoring_handlers.handle_container_stats()
-            elif choice == "5":
+            elif choice == "4":
                 self._view_logs()
             elif choice == "0" or choice == "back":
                 break
@@ -367,15 +359,11 @@ For help, see: /opt/server-manager/README.md
             choice = self.ui.show_settings_menu()
 
             if choice == "1":
-                self._configure_rsync_placeholder()
-            elif choice == "2":
-                self._set_backup_retention_placeholder()
-            elif choice == "3":
                 # Navigate to notification configuration
                 self.scheduling_handlers.handle_configure_notifications()
-            elif choice == "4":
+            elif choice == "2":
                 self._view_config()
-            elif choice == "5":
+            elif choice == "3":
                 self._edit_config_placeholder()
             elif choice == "0" or choice == "back":
                 break
