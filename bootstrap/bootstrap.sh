@@ -194,9 +194,6 @@ install_system_packages() {
         dialog \
         borgbackup \
         rsync \
-        docker.io \
-        docker-compose \
-        ufw \
         git \
         python3 \
         python3-venv \
@@ -206,12 +203,6 @@ install_system_packages() {
         ca-certificates >> "$LOG_FILE" 2>&1
 
     success "All required packages installed"
-
-    # Start and enable Docker
-    log "Starting Docker service..."
-    systemctl start docker >> "$LOG_FILE" 2>&1
-    systemctl enable docker >> "$LOG_FILE" 2>&1
-    success "Docker service started and enabled"
 }
 
 ################################################################################
