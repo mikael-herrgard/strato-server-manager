@@ -194,7 +194,8 @@ class ServerManagerUI:
             ("1", "Update nginx Proxy Manager"),
             ("2", "Update Mailcow"),
             ("3", "Update System Packages"),
-            ("4", "Cleanup Docker"),
+            ("4", "Cleanup Old Backups"),
+            ("5", "Cleanup Docker"),
             ("0", "Back to Main Menu")
         ]
 
@@ -222,8 +223,9 @@ class ServerManagerUI:
         menu_items = [
             ("1", "Service Status"),
             ("2", "Disk Usage"),
-            ("3", "Container Stats"),
-            ("4", "View Logs"),
+            ("3", "Backup History"),
+            ("4", "Container Stats"),
+            ("5", "View Logs"),
             ("0", "Back to Main Menu")
         ]
 
@@ -250,8 +252,9 @@ class ServerManagerUI:
         """
         menu_items = [
             ("1", "Notification Settings"),
-            ("2", "View Configuration"),
-            ("3", "Edit Configuration File"),
+            ("2", "Set Backup Retention"),
+            ("3", "View Configuration"),
+            ("4", "Edit Configuration File"),
             ("0", "Back to Main Menu")
         ]
 

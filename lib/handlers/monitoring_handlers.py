@@ -9,22 +9,30 @@ from ..utils import logger
 class MonitoringHandlers:
     """Handles monitoring and status menu operations"""
 
-    def __init__(self, ui, monitoring_manager):
+    def __init__(self, ui, monitoring_manager, restore_manager=None):
         """
         Initialize monitoring handlers
 
         Args:
             ui: ServerManagerUI instance
             monitoring_manager: MonitoringManager instance (or callable)
+            restore_manager: RestoreManager instance (or callable) - optional
         """
         self.ui = ui
         self._monitoring_manager = monitoring_manager
+        self._restore_manager = restore_manager
 
     def _get_monitoring_manager(self):
         """Get monitoring manager (lazy initialization support)"""
         if callable(self._monitoring_manager):
             return self._monitoring_manager()
         return self._monitoring_manager
+
+    def _get_restore_manager(self):
+        """Get restore manager (lazy initialization support)"""
+        if callable(self._restore_manager):
+            return self._restore_manager()
+        return self._restore_manager
 
     def handle_service_status(self):
         """Show service status"""
@@ -188,3 +196,44 @@ class MonitoringHandlers:
         except Exception as e:
             logger.error(f"Disk usage error: {e}")
             self.ui.show_error(f"Failed to get disk usage:\n\n{e}")
+
+    def handle_backup_history(self):
+        """Display backup history for all services"""
+        try:
+            restore_mgr = self._get_restore_manager()
+            if not restore_mgr:
+                self.ui.show_error("Restore manager not available")
+                return
+
+            self.ui.show_infobox("Retrieving backup history...\n\nPlease wait...")
+
+            # Build backup history text
+            history_text = "Backup History\n"
+            history_text += "=" * 60 + "\n\n"
+
+            for service in ['nginx', 'mailcow']:
+                try:
+                    backups = restore_mgr.list_remote_backups(service)
+
+                    history_text += f"{service.upper()}:\n"
+                    if backups:
+                        history_text += f"  Total: {len(backups)} backups\n\n"
+                        history_text += "  Recent backups:\n"
+                        # Show last 10 backups (already sorted newest first by Borg)
+                        for backup in backups[:10]:
+                            history_text += f"    • {backup['name']}\n"
+                    else:
+                        history_text += "  No backups found\n"
+                    history_text += "\n"
+
+                except Exception as e:
+                    logger.error(f"Failed to list {service} backups: {e}")
+                    history_text += f"{service.upper()}:\n"
+                    history_text += f"  Error retrieving backups: {str(e)}\n\n"
+
+            self.ui.show_scrollable_text(history_text, "Backup History")
+            logger.info("Backup history displayed via TUI")
+
+        except Exception as e:
+            logger.error(f"Backup history error: {e}")
+            self.ui.show_error(f"Failed to retrieve backup history:\n\n{e}")

@@ -59,8 +59,8 @@ class ServerManager:
         self.restore_handlers = RestoreHandlers(self.ui, self._get_restore_manager)
         self.installation_handlers = InstallationHandlers(self.ui, self._get_installation_manager)
         self.system_handlers = SystemHandlers(self.ui, self._get_system_config_manager)
-        self.maintenance_handlers = MaintenanceHandlers(self.ui, self._get_maintenance_manager)
-        self.monitoring_handlers = MonitoringHandlers(self.ui, self._get_monitoring_manager)
+        self.maintenance_handlers = MaintenanceHandlers(self.ui, self._get_maintenance_manager, self._get_backup_manager)
+        self.monitoring_handlers = MonitoringHandlers(self.ui, self._get_monitoring_manager, self._get_restore_manager)
         self.scheduling_handlers = SchedulingHandlers(self.ui, self._get_scheduling_manager, self._get_notification_manager)
 
         logger.info("Server Manager started")
@@ -311,6 +311,8 @@ For help, see: /opt/server-manager/README.md
             elif choice == "3":
                 self.maintenance_handlers.handle_update_system()
             elif choice == "4":
+                self.maintenance_handlers.handle_cleanup_backups()
+            elif choice == "5":
                 self.maintenance_handlers.handle_cleanup_docker()
             elif choice == "0" or choice == "back":
                 break
@@ -325,8 +327,10 @@ For help, see: /opt/server-manager/README.md
             elif choice == "2":
                 self.monitoring_handlers.handle_disk_usage()
             elif choice == "3":
-                self.monitoring_handlers.handle_container_stats()
+                self.monitoring_handlers.handle_backup_history()
             elif choice == "4":
+                self.monitoring_handlers.handle_container_stats()
+            elif choice == "5":
                 self._view_logs()
             elif choice == "0" or choice == "back":
                 break
@@ -362,8 +366,10 @@ For help, see: /opt/server-manager/README.md
                 # Navigate to notification configuration
                 self.scheduling_handlers.handle_configure_notifications()
             elif choice == "2":
-                self._view_config()
+                self._set_retention()
             elif choice == "3":
+                self._view_config()
+            elif choice == "4":
                 self._edit_config_placeholder()
             elif choice == "0" or choice == "back":
                 break
@@ -464,6 +470,117 @@ For help, see: /opt/server-manager/README.md
         except Exception as e:
             logger.error(f"Failed to read config: {e}")
             self.ui.show_error(f"Failed to read configuration:\n\n{e}")
+
+    def _set_retention(self):
+        """Edit backup retention policy"""
+        try:
+            # Get current retention values
+            current_retention = self.config.get('borg.retention', {
+                'daily': 7,
+                'weekly': 4,
+                'monthly': 6
+            })
+
+            # Get daily retention
+            code, daily_str = self.ui.d.inputbox(
+                "Enter number of daily backups to keep:\n\n"
+                "This determines how many of the most recent daily backups will be retained.",
+                height=12,
+                width=60,
+                init=str(current_retention.get('daily', 7)),
+                title="Set Daily Retention"
+            )
+
+            if code != self.ui.d.OK:
+                return
+
+            # Validate daily input
+            try:
+                daily = int(daily_str)
+                if daily < 1:
+                    raise ValueError("Must be at least 1")
+            except ValueError as e:
+                self.ui.show_error(f"Invalid daily retention value.\n\nMust be a positive integer.")
+                return
+
+            # Get weekly retention
+            code, weekly_str = self.ui.d.inputbox(
+                "Enter number of weekly backups to keep:\n\n"
+                "This determines how many weekly backups will be retained.",
+                height=12,
+                width=60,
+                init=str(current_retention.get('weekly', 4)),
+                title="Set Weekly Retention"
+            )
+
+            if code != self.ui.d.OK:
+                return
+
+            # Validate weekly input
+            try:
+                weekly = int(weekly_str)
+                if weekly < 1:
+                    raise ValueError("Must be at least 1")
+            except ValueError as e:
+                self.ui.show_error(f"Invalid weekly retention value.\n\nMust be a positive integer.")
+                return
+
+            # Get monthly retention
+            code, monthly_str = self.ui.d.inputbox(
+                "Enter number of monthly backups to keep:\n\n"
+                "This determines how many monthly backups will be retained.",
+                height=12,
+                width=60,
+                init=str(current_retention.get('monthly', 6)),
+                title="Set Monthly Retention"
+            )
+
+            if code != self.ui.d.OK:
+                return
+
+            # Validate monthly input
+            try:
+                monthly = int(monthly_str)
+                if monthly < 1:
+                    raise ValueError("Must be at least 1")
+            except ValueError as e:
+                self.ui.show_error(f"Invalid monthly retention value.\n\nMust be a positive integer.")
+                return
+
+            # Confirm changes
+            if not self.ui.confirm_action(
+                "Confirm new retention policy:\n\n"
+                f"  Daily:   {current_retention.get('daily', 7)} → {daily}\n"
+                f"  Weekly:  {current_retention.get('weekly', 4)} → {weekly}\n"
+                f"  Monthly: {current_retention.get('monthly', 6)} → {monthly}\n\n"
+                "These settings will be applied to future backup cleanups.\n\n"
+                "Save changes?",
+                "Confirm Retention Policy"
+            ):
+                return
+
+            # Update configuration
+            self.config.set('borg.retention.daily', daily)
+            self.config.set('borg.retention.weekly', weekly)
+            self.config.set('borg.retention.monthly', monthly)
+
+            # Save configuration
+            if self.config.save_config():
+                self.ui.show_success(
+                    "Retention policy updated successfully!\n\n"
+                    f"New policy:\n"
+                    f"  • Daily: {daily} backups\n"
+                    f"  • Weekly: {weekly} backups\n"
+                    f"  • Monthly: {monthly} backups\n\n"
+                    "These settings will be used for future backup cleanups."
+                )
+                logger.info(f"Retention policy updated: daily={daily}, weekly={weekly}, monthly={monthly}")
+            else:
+                self.ui.show_error("Failed to save configuration.\n\nCheck logs for details.")
+
+        except Exception as e:
+            logger.error(f"Set retention error: {e}")
+            self.ui.show_error(f"Failed to update retention policy:\n\n{e}")
 
 
 def main():

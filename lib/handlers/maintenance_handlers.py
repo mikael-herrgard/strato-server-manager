@@ -9,22 +9,30 @@ from ..utils import logger
 class MaintenanceHandlers:
     """Handles maintenance menu operations"""
 
-    def __init__(self, ui, maintenance_manager):
+    def __init__(self, ui, maintenance_manager, backup_manager=None):
         """
         Initialize maintenance handlers
 
         Args:
             ui: ServerManagerUI instance
             maintenance_manager: MaintenanceManager instance (or callable)
+            backup_manager: BackupManager instance (or callable) - optional
         """
         self.ui = ui
         self._maintenance_manager = maintenance_manager
+        self._backup_manager = backup_manager
 
     def _get_maintenance_manager(self):
         """Get maintenance manager (lazy initialization support)"""
         if callable(self._maintenance_manager):
             return self._maintenance_manager()
         return self._maintenance_manager
+
+    def _get_backup_manager(self):
+        """Get backup manager (lazy initialization support)"""
+        if callable(self._backup_manager):
+            return self._backup_manager()
+        return self._backup_manager
 
     def handle_update_nginx(self):
         """Update nginx"""
@@ -221,4 +229,83 @@ class MaintenanceHandlers:
 
         except Exception as e:
             logger.error(f"Docker cleanup error: {e}")
+            self.ui.show_error(f"Cleanup failed:\n\n{e}")
+
+    def handle_cleanup_backups(self):
+        """Cleanup old backups based on retention policy"""
+        try:
+            backup_mgr = self._get_backup_manager()
+            if not backup_mgr:
+                self.ui.show_error("Backup manager not available")
+                return
+
+            # Get current retention policy from config
+            retention = backup_mgr.retention
+
+            # Select service to cleanup
+            services = [
+                ("nginx", "nginx Proxy Manager"),
+                ("mailcow", "Mailcow"),
+                ("both", "Both services")
+            ]
+
+            selected = self.ui.select_from_list(
+                services,
+                "Select service to cleanup:",
+                "Cleanup Old Backups"
+            )
+
+            if not selected:
+                return
+
+            # Confirm action
+            if not self.ui.confirm_action(
+                f"This will prune old backups for {selected} using retention policy:\n\n"
+                f"  • Daily: Keep last {retention['daily']} backups\n"
+                f"  • Weekly: Keep last {retention['weekly']} backups\n"
+                f"  • Monthly: Keep last {retention['monthly']} backups\n\n"
+                "Backups older than these retention periods will be permanently deleted.\n\n"
+                "Continue?",
+                "Cleanup Old Backups"
+            ):
+                return
+
+            # Show progress
+            self.ui.show_infobox("Cleaning up old backups...\n\nPlease wait...")
+
+            # Determine which services to cleanup
+            services_to_cleanup = []
+            if selected == "both":
+                services_to_cleanup = ["nginx", "mailcow"]
+            else:
+                services_to_cleanup = [selected]
+
+            # Cleanup each service
+            success_count = 0
+            for service in services_to_cleanup:
+                repo = backup_mgr._get_borg_repo(service)
+                if backup_mgr.prune_old_backups(repo):
+                    success_count += 1
+                    logger.info(f"Pruned old backups for {service}")
+                else:
+                    logger.error(f"Failed to prune backups for {service}")
+
+            # Show result
+            if success_count == len(services_to_cleanup):
+                self.ui.show_success(
+                    f"Backup cleanup completed successfully!\n\n"
+                    f"Cleaned up {len(services_to_cleanup)} service(s).\n\n"
+                    "Old backups have been pruned based on retention policy.\n"
+                    "Check logs for details about freed space."
+                )
+                logger.info(f"Backup cleanup completed via TUI for {services_to_cleanup}")
+            else:
+                self.ui.show_error(
+                    f"Backup cleanup partially failed.\n\n"
+                    f"Successfully cleaned: {success_count}/{len(services_to_cleanup)} services.\n\n"
+                    "Check logs for details."
+                )
+
+        except Exception as e:
+            logger.error(f"Backup cleanup error: {e}")
             self.ui.show_error(f"Cleanup failed:\n\n{e}")
