@@ -4,9 +4,9 @@
 # Rsync backup server configuration
 rsync:
   host: rsync-backup              # Hostname or IP of rsync server
-  user: root                       # SSH user for rsync server
-  base_path: /backups              # Base path on rsync server for backups
-  ssh_key: /root/.ssh/backup_key   # Path to SSH private key for authentication
+  user: zh5554                     # SSH user for rsync server
+  base_path: backups               # Base path on rsync server for backups
+  ssh_key: /root/.ssh/rsync.key    # Path to SSH private key for authentication
 
 # Borg backup configuration
 borg:
@@ -22,7 +22,7 @@ mailcow:
   install_path: /opt/mailcow-dockerized    # Installation directory
   backup_types:                            # Types of backups to create
     - all                                  # Options: all, config, mail, db
-  domain: mail.example.com                 # Mailcow domain
+  domain: mail.villaherrgard.com           # Mailcow domain
   http_port: 80                            # HTTP port (default: 80)
   https_port: 443                          # HTTPS port (default: 443)
   http_redirect: "y"                       # HTTP to HTTPS redirect (y/n, default: y)
@@ -30,7 +30,7 @@ mailcow:
 # Nginx Proxy Manager configuration
 nginx:
   install_path: /root/nginx        # Installation directory
-  domain: nginx.example.com        # Admin interface domain
+  domain: nginx.villaherrgard.com  # Admin interface domain
 
 # System configuration
 system:
