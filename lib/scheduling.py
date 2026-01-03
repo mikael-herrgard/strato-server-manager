@@ -116,8 +116,6 @@ class SchedulingManager:
             return 'backup_nginx'
         elif 'backup-mailcow' in command or 'backup_mailcow' in command:
             return 'backup_mailcow'
-        elif 'backup-application' in command or 'backup_application' in command:
-            return 'backup_application'
         elif 'cleanup' in command:
             return 'cleanup'
         elif 'update' in command:

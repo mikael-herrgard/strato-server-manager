@@ -217,7 +217,7 @@ Server Information:
   IP Address: {ip}
 
 This tool provides:
-  • Automated backups (nginx, Mailcow, application)
+  • Automated backups (nginx, Mailcow)
   • Disaster recovery and restore
   • Service installation and configuration
   • System maintenance and monitoring

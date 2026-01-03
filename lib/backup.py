@@ -455,14 +455,14 @@ class BackupManager:
         """
         status = {}
 
-        for service in ['nginx', 'mailcow', 'server-manager']:
+        for service in ['nginx', 'mailcow']:
             repo = self._get_borg_repo(service)
             backups = self.list_backups(repo)
 
             status[service] = {
                 'repository': repo,
                 'backup_count': len(backups),
-                'latest_backup': backups[0]['name'] if backups else None,
+                'latest_backup': backups[-1]['name'] if backups else None,
                 'all_backups': backups
             }
 

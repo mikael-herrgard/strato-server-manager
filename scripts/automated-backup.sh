@@ -73,9 +73,7 @@ try:
     if service == "nginx":
         success = backup_mgr.backup_nginx(verify=verify)
     elif service == "mailcow":
-        success = backup_mgr.backup_mailcow(backup_type="full", verify=verify)
-    elif service == "application":
-        success = backup_mgr.backup_application()
+        success = backup_mgr.backup_mailcow(backup_type="all", verify=verify)
     else:
         print(f"Error: Unknown service: {service}")
         sys.exit(1)
