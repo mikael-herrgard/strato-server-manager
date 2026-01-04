@@ -43,14 +43,12 @@ class ServerManagerUI:
             Selected menu code or 'exit'
         """
         menu_items = [
-            ("1", "Backup Management"),
+            ("1", "Installation"),
             ("2", "Restore Management"),
-            ("3", "Installation"),
-            ("4", "System Configuration"),
-            ("5", "Maintenance"),
-            ("6", "Status & Monitoring"),
-            ("7", "Scheduling & Automation"),
-            ("8", "Settings"),
+            ("3", "Backup Management"),
+            ("4", "Maintenance"),
+            ("5", "Status & Monitoring"),
+            ("6", "Settings"),
             ("0", "Exit")
         ]
 
@@ -149,34 +147,6 @@ class ServerManagerUI:
             menu_height=len(menu_items),
             choices=menu_items,
             title="Installation"
-        )
-
-        if code == self.d.OK:
-            return tag
-        else:
-            return "back"
-
-    def show_system_menu(self) -> str:
-        """
-        Show system configuration menu
-
-        Returns:
-            Selected menu code or 'back'
-        """
-        menu_items = [
-            ("1", "Disable IPv6"),
-            ("2", "Enable IPv6"),
-            ("3", "System Information"),
-            ("0", "Back to Main Menu")
-        ]
-
-        code, tag = self.d.menu(
-            "System Configuration - Select an option:",
-            height=self.height,
-            width=self.width,
-            menu_height=len(menu_items),
-            choices=menu_items,
-            title="System Configuration"
         )
 
         if code == self.d.OK:

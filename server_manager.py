@@ -17,7 +17,6 @@ from lib.utils import logger, check_root, get_hostname, get_ip_address
 from lib.backup import BackupManager
 from lib.restore import RestoreManager
 from lib.installation import InstallationManager
-from lib.system_config import SystemConfigManager
 from lib.maintenance import MaintenanceManager
 from lib.monitoring import MonitoringManager
 from lib.scheduling import SchedulingManager
@@ -28,7 +27,6 @@ from lib.handlers import (
     BackupHandlers,
     RestoreHandlers,
     InstallationHandlers,
-    SystemHandlers,
     MaintenanceHandlers,
     MonitoringHandlers,
     SchedulingHandlers
@@ -48,7 +46,6 @@ class ServerManager:
         self.backup_manager = None
         self.restore_manager = None
         self.installation_manager = None
-        self.system_config_manager = None
         self.maintenance_manager = None
         self.monitoring_manager = None
         self.scheduling_manager = None
@@ -58,7 +55,6 @@ class ServerManager:
         self.backup_handlers = BackupHandlers(self.ui, self._get_backup_manager)
         self.restore_handlers = RestoreHandlers(self.ui, self._get_restore_manager)
         self.installation_handlers = InstallationHandlers(self.ui, self._get_installation_manager)
-        self.system_handlers = SystemHandlers(self.ui, self._get_system_config_manager)
         self.maintenance_handlers = MaintenanceHandlers(self.ui, self._get_maintenance_manager, self._get_backup_manager)
         self.monitoring_handlers = MonitoringHandlers(self.ui, self._get_monitoring_manager, self._get_restore_manager)
         self.scheduling_handlers = SchedulingHandlers(self.ui, self._get_scheduling_manager, self._get_notification_manager)
@@ -98,17 +94,6 @@ class ServerManager:
                 self.ui.show_error(f"Failed to initialize installation system:\n\n{e}")
                 raise
         return self.installation_manager
-
-    def _get_system_config_manager(self) -> SystemConfigManager:
-        """Get or create system config manager instance"""
-        if self.system_config_manager is None:
-            try:
-                self.system_config_manager = SystemConfigManager()
-            except Exception as e:
-                logger.error(f"Failed to initialize system config manager: {e}")
-                self.ui.show_error(f"Failed to initialize system configuration:\n\n{e}")
-                raise
-        return self.system_config_manager
 
     def _get_maintenance_manager(self) -> MaintenanceManager:
         """Get or create maintenance manager instance"""
@@ -175,20 +160,16 @@ class ServerManager:
                         self.running = False
                         logger.info("Server Manager exiting")
                 elif choice == "1":
-                    self._backup_menu()
+                    self._installation_menu()
                 elif choice == "2":
                     self._restore_menu()
                 elif choice == "3":
-                    self._installation_menu()
+                    self._backup_menu()
                 elif choice == "4":
-                    self._system_menu()
-                elif choice == "5":
                     self._maintenance_menu()
-                elif choice == "6":
+                elif choice == "5":
                     self._monitoring_menu()
-                elif choice == "7":
-                    self._scheduling_menu()
-                elif choice == "8":
+                elif choice == "6":
                     self._settings_menu()
 
             except KeyboardInterrupt:
@@ -283,21 +264,6 @@ For help, see: /opt/server-manager/README.md
                 self._install_portainer_placeholder()
             elif choice == "4":
                 self.installation_handlers.handle_check_prerequisites()
-            elif choice == "0" or choice == "back":
-                break
-
-    def _system_menu(self):
-        """Show system configuration menu"""
-        while True:
-            choice = self.ui.show_system_menu()
-
-            if choice == "1":
-                self.system_handlers.handle_disable_ipv6()
-            elif choice == "2":
-                self.system_handlers.handle_enable_ipv6()
-            elif choice == "3":
-                # System Information - use monitoring handler
-                self.monitoring_handlers.handle_system_info()
             elif choice == "0" or choice == "back":
                 break
 
