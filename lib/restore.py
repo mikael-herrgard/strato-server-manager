@@ -433,19 +433,53 @@ class RestoreManager:
                 return False
 
             # The backup contains the Mailcow backup directory structure
-            # Find the extracted mailcow backup directory
-            extracted_backup = None
-            for item in os.listdir(temp_dir):
-                item_path = os.path.join(temp_dir, item)
-                if os.path.isdir(item_path) and item.startswith('mailcow-'):
-                    extracted_backup = item_path
-                    break
+            # The restore script expects the PARENT directory containing mailcow-* subdirectories
+            # Support both old (in /opt/mailcow-dockerized/backups) and new (in /var/backups/mailcow-data) structures
+            backup_parent_dir = None
+            found_backup_name = None
 
-            if not extracted_backup:
+            # First, check if extraction created nested path structure (old backups)
+            old_backup_path = os.path.join(temp_dir, 'opt/mailcow-dockerized/backups')
+            if os.path.exists(old_backup_path):
+                logger.info("Found old backup structure with nested path")
+                for item in os.listdir(old_backup_path):
+                    item_path = os.path.join(old_backup_path, item)
+                    if os.path.isdir(item_path) and item.startswith('mailcow-'):
+                        backup_parent_dir = old_backup_path
+                        found_backup_name = item
+                        break
+
+            # Try new backup location structure
+            if not backup_parent_dir:
+                new_backup_path = os.path.join(temp_dir, 'var/backups/mailcow-data')
+                if os.path.exists(new_backup_path):
+                    logger.info("Found new backup structure with nested path")
+                    for item in os.listdir(new_backup_path):
+                        item_path = os.path.join(new_backup_path, item)
+                        if os.path.isdir(item_path) and item.startswith('mailcow-'):
+                            backup_parent_dir = new_backup_path
+                            found_backup_name = item
+                            break
+
+            # Finally, check directly in temp_dir (for manually extracted backups)
+            if not backup_parent_dir:
+                for item in os.listdir(temp_dir):
+                    item_path = os.path.join(temp_dir, item)
+                    if os.path.isdir(item_path) and item.startswith('mailcow-'):
+                        backup_parent_dir = temp_dir
+                        found_backup_name = item
+                        break
+
+            if not backup_parent_dir:
                 logger.error("Mailcow backup directory not found in extraction")
+                logger.error(f"Checked paths:")
+                logger.error(f"  - {old_backup_path}")
+                logger.error(f"  - {new_backup_path}")
+                logger.error(f"  - {temp_dir}")
+                logger.error(f"Contents of temp_dir: {os.listdir(temp_dir)}")
                 return False
 
-            logger.info(f"Found Mailcow backup: {extracted_backup}")
+            logger.info(f"Found Mailcow backup: {found_backup_name} in {backup_parent_dir}")
 
             # Use Mailcow's official restore script
             restore_script = os.path.join(mailcow_path, 'helper-scripts', 'backup_and_restore.sh')
@@ -457,15 +491,28 @@ class RestoreManager:
 
             # Run Mailcow restore
             logger.info("Running Mailcow restore script...")
-            cmd = [restore_script, 'restore', extracted_backup]
+            # The script expects "restore" command without path argument
+            # It will ask for the backup location via stdin
+            cmd = [restore_script, 'restore']
 
             mailcow_env = os.environ.copy()
+
+            # The mailcow script is interactive and asks:
+            # 1. "Backup location (absolute path, starting with /):" - provide the parent directory
+            # 2. "Select a restore point:" - provide "1" to select the first mailcow-* folder
+            # 3. "Select a dataset to restore:" - provide "0" for all datasets
+            # Provide automatic responses to interactive prompts
+            input_data = f"{backup_parent_dir}\n1\n0\n"
+
+            logger.info(f"Providing backup location: {backup_parent_dir}")
+
             returncode, stdout, stderr = run_command(
                 cmd,
                 check=True,
                 cwd=mailcow_path,
                 env=mailcow_env,
-                timeout=3600  # 1 hour
+                timeout=3600,  # 1 hour
+                input_data=input_data
             )
 
             logger.info("Mailcow restore completed successfully")

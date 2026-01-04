@@ -131,6 +131,7 @@ def run_command(
         logger.error(f"Command failed: {' '.join(cmd)}")
         logger.error(f"Return code: {e.returncode}")
         if capture_output:
+            logger.error(f"Stdout: {e.stdout}")
             logger.error(f"Stderr: {e.stderr}")
         raise
 
