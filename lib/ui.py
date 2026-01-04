@@ -105,8 +105,8 @@ class ServerManagerUI:
         """
         menu_items = [
             ("1", "Restore nginx Proxy Manager"),
-            ("2", "Restore Mailcow Data"),
-            ("3", "Restore Mailcow Directory"),
+            ("2", "Restore Mailcow Directory"),
+            ("3", "Restore Mailcow Data"),
             ("4", "List Available Backups"),
             ("0", "Back to Main Menu")
         ]

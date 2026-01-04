@@ -243,9 +243,9 @@ For help, see: /opt/server-manager/README.md
             if choice == "1":
                 self.restore_handlers.handle_restore_nginx()
             elif choice == "2":
-                self.restore_handlers.handle_restore_mailcow()
-            elif choice == "3":
                 self.restore_handlers.handle_restore_mailcow_directory()
+            elif choice == "3":
+                self.restore_handlers.handle_restore_mailcow()
             elif choice == "4":
                 self.restore_handlers.handle_list_backups()
             elif choice == "0" or choice == "back":
