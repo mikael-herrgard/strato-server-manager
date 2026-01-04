@@ -135,7 +135,7 @@ class SchedulingManager:
         Schedule automated backup
 
         Args:
-            service: Service to backup (nginx, mailcow, application)
+            service: Service to backup (nginx, mailcow, mailcow-directory, application)
             schedule: Cron schedule expression
             options: Optional backup options
 

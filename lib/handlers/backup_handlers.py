@@ -110,6 +110,42 @@ class BackupHandlers:
             logger.error(f"Mailcow backup error: {e}")
             self.ui.show_error(f"Backup failed:\n\n{e}")
 
+    def handle_backup_mailcow_directory(self):
+        """Backup Mailcow directory (configuration and certificates)"""
+        if not self.ui.confirm_action(
+            "This will create a backup of the Mailcow installation directory.\n\n"
+            "This includes:\n"
+            "  • Configuration files (mailcow.conf)\n"
+            "  • SSL certificates\n"
+            "  • DKIM keys\n"
+            "  • Docker compose files\n\n"
+            "The backup will be stored on your rsync server.\n\n"
+            "This may take 2-5 minutes.\n\n"
+            "Continue?",
+            "Backup Mailcow Directory"
+        ):
+            return
+
+        try:
+            backup_mgr = self._get_backup_manager()
+
+            self.ui.show_infobox("Creating Mailcow directory backup...\n\nThis may take a few minutes.")
+
+            success = backup_mgr.backup_mailcow_directory(verify=True)
+
+            if success:
+                self.ui.show_success(
+                    "Mailcow directory backup completed successfully!\n\n"
+                    "The backup has been stored on your rsync server and verified."
+                )
+                logger.info("Mailcow directory backup completed via TUI")
+            else:
+                self.ui.show_error("Mailcow directory backup failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Mailcow directory backup error: {e}")
+            self.ui.show_error(f"Backup failed:\n\n{e}")
+
     def handle_view_backup_status(self):
         """View backup status"""
         try:
@@ -121,7 +157,7 @@ class BackupHandlers:
 
             # Build status text
             status_text = "Backup Status\n"
-            status_text += "=" * 60 + "\n\n"
+            status_text += "=" * 95 + "\n\n"
 
             for service, info in status.items():
                 status_text += f"{service.upper()}:\n"

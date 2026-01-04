@@ -164,6 +164,90 @@ class RestoreHandlers:
             logger.error(f"Mailcow restore error: {e}")
             self.ui.show_error(f"Restore failed:\n\n{e}")
 
+    def handle_restore_mailcow_directory(self):
+        """Restore Mailcow directory (configuration and certificates) from backup"""
+        try:
+            restore_mgr = self._get_restore_manager()
+
+            # List available backups
+            self.ui.show_infobox("Retrieving backup list...\n\nPlease wait...")
+            backups = restore_mgr.list_remote_backups('mailcow-directory')
+
+            if not backups:
+                self.ui.show_error(
+                    "No Mailcow directory backups found on remote server.\n\n"
+                    "Create a backup first:\n"
+                    "  Backup Management → Backup Mailcow Directory"
+                )
+                return
+
+            # Build selection list
+            backup_items = [("latest", "Latest backup (recommended)")]
+            for backup in backups[:10]:  # Show last 10
+                backup_items.append((backup['name'], backup['name']))
+
+            # Show selection dialog
+            selected_backup = self.ui.select_from_list(
+                backup_items,
+                "Select Mailcow directory backup to restore:",
+                "Restore Mailcow Directory"
+            )
+
+            if not selected_backup:
+                return
+
+            # Confirm restore
+            if not self.ui.confirm_action(
+                f"This will restore Mailcow directory from backup:\n\n"
+                f"  {selected_backup}\n\n"
+                "This restores:\n"
+                "  • Configuration files (mailcow.conf)\n"
+                "  • SSL certificates\n"
+                "  • DKIM keys\n"
+                "  • Docker compose files\n\n"
+                "WARNING:\n"
+                "  • Mailcow services will be stopped\n"
+                "  • Current directory will be backed up\n"
+                "  • This may take 5-10 minutes\n"
+                "  • You'll need to pull images and restore data separately\n\n"
+                "Continue?",
+                "Restore Mailcow Directory"
+            ):
+                return
+
+            self.ui.show_infobox(
+                "Restoring Mailcow directory from backup...\n\n"
+                "This may take 5-10 minutes.\n"
+                "Please be patient..."
+            )
+
+            success = restore_mgr.restore_mailcow_directory(selected_backup)
+
+            if success:
+                self.ui.show_success(
+                    "Mailcow directory restored successfully!\n\n"
+                    "Configuration and certificates have been restored.\n\n"
+                    "NEXT STEPS FOR FULL RECOVERY:\n"
+                    "  1. Pull Docker images:\n"
+                    "     cd /opt/mailcow-dockerized && docker compose pull\n\n"
+                    "  2. Start services to create volumes:\n"
+                    "     docker compose up -d\n\n"
+                    "  3. Stop services for data restore:\n"
+                    "     docker compose down\n\n"
+                    "  4. Restore mailcow data:\n"
+                    "     Use 'Restore Mailcow Data' from menu\n\n"
+                    "  5. Start services:\n"
+                    "     docker compose up -d\n\n"
+                    "See logs for detailed recovery instructions."
+                )
+                logger.info(f"Mailcow directory restore completed via TUI from {selected_backup}")
+            else:
+                self.ui.show_error("Mailcow directory restore failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Mailcow directory restore error: {e}")
+            self.ui.show_error(f"Restore failed:\n\n{e}")
+
     def handle_list_backups(self):
         """List available backups"""
         try:
@@ -173,9 +257,9 @@ class RestoreHandlers:
 
             # Build backup list text
             backup_text = "Available Backups\n"
-            backup_text += "=" * 60 + "\n\n"
+            backup_text += "=" * 95 + "\n\n"
 
-            for service in ['nginx', 'mailcow', 'server-manager']:
+            for service in ['nginx', 'mailcow', 'mailcow-directory', 'server-manager']:
                 backups = restore_mgr.list_remote_backups(service)
 
                 backup_text += f"{service.upper()}:\n"

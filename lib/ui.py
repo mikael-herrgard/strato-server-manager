@@ -32,7 +32,7 @@ class ServerManagerUI:
 
         # UI dimensions
         self.height = 20
-        self.width = 70
+        self.width = 100
         self.menu_height = 12
 
     def show_main_menu(self) -> str:
@@ -77,9 +77,10 @@ class ServerManagerUI:
         """
         menu_items = [
             ("1", "Backup nginx Proxy Manager"),
-            ("2", "Backup Mailcow"),
-            ("3", "View Backup Status"),
-            ("4", "Configure Backup Schedule"),
+            ("2", "Backup Mailcow Data"),
+            ("3", "Backup Mailcow Directory"),
+            ("4", "View Backup Status"),
+            ("5", "Configure Backup Schedule"),
             ("0", "Back to Main Menu")
         ]
 
@@ -106,8 +107,9 @@ class ServerManagerUI:
         """
         menu_items = [
             ("1", "Restore nginx Proxy Manager"),
-            ("2", "Restore Mailcow"),
-            ("3", "List Available Backups"),
+            ("2", "Restore Mailcow Data"),
+            ("3", "Restore Mailcow Directory"),
+            ("4", "List Available Backups"),
             ("0", "Back to Main Menu")
         ]
 
@@ -135,9 +137,8 @@ class ServerManagerUI:
         menu_items = [
             ("1", "Install Docker"),
             ("2", "Install nginx Proxy Manager"),
-            ("3", "Install Mailcow"),
-            ("4", "Install Portainer"),
-            ("5", "Check Prerequisites"),
+            ("3", "Install Portainer"),
+            ("4", "Check Prerequisites"),
             ("0", "Back to Main Menu")
         ]
 
@@ -521,7 +522,7 @@ class ServerManagerUI:
         text: str,
         title: str = "Information",
         height: int = 20,
-        width: int = 70
+        width: int = None
     ) -> None:
         """
         Show scrollable text
@@ -530,8 +531,11 @@ class ServerManagerUI:
             text: Text to display
             title: Dialog title
             height: Dialog height
-            width: Dialog width
+            width: Dialog width (defaults to self.width)
         """
+        if width is None:
+            width = self.width
+
         self.d.scrollbox(
             text,
             height=height,

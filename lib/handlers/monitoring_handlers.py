@@ -44,7 +44,7 @@ class MonitoringHandlers:
 
             # Build status text
             status_text = "Service Status\n"
-            status_text += "=" * 60 + "\n\n"
+            status_text += "=" * 95 + "\n\n"
 
             for service_name, status in all_status.items():
                 status_text += f"{service_name.upper()}:\n"
@@ -118,7 +118,7 @@ class MonitoringHandlers:
 
             # Build info text
             info_text = "System Information\n"
-            info_text += "=" * 60 + "\n\n"
+            info_text += "=" * 95 + "\n\n"
 
             info_text += f"Hostname: {info.get('hostname', 'Unknown')}\n"
             info_text += f"IP Address: {info.get('ip_address', 'Unknown')}\n"
@@ -161,7 +161,7 @@ class MonitoringHandlers:
 
             # Build usage text
             usage_text = "Disk Usage\n"
-            usage_text += "=" * 60 + "\n\n"
+            usage_text += "=" * 95 + "\n\n"
 
             # Partitions
             if 'partitions' in usage and usage['partitions']:
@@ -209,7 +209,7 @@ class MonitoringHandlers:
 
             # Build backup history text
             history_text = "Backup History\n"
-            history_text += "=" * 60 + "\n\n"
+            history_text += "=" * 95 + "\n\n"
 
             for service in ['nginx', 'mailcow']:
                 try:

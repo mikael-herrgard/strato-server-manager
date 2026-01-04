@@ -370,7 +370,8 @@ class BackupManager:
         # Get configuration
         mailcow_path = self.mailcow_config['install_path']
         backup_script = os.path.join(mailcow_path, 'helper-scripts', 'backup_and_restore.sh')
-        mailcow_backup_dir = os.path.join(mailcow_path, 'backups')
+        # Use separate backup directory outside mailcow install path
+        mailcow_backup_dir = '/var/backups/mailcow-data'
 
         # Pre-backup checks
         if not self._pre_backup_checks('mailcow', required_gb=20):
@@ -388,14 +389,15 @@ class BackupManager:
         # Ensure backup directory exists
         ensure_directory(mailcow_backup_dir)
 
-        # Set environment variable for backup location
+        # Set environment variables for backup location and resource limits
         mailcow_env = os.environ.copy()
         mailcow_env['MAILCOW_BACKUP_LOCATION'] = mailcow_backup_dir
+        mailcow_env['THREADS'] = '2'  # Limit CPU usage, leaving 2 cores for other tasks
 
         try:
-            # Run Mailcow's official backup script
+            # Run Mailcow's official backup script with local retention policy
             with CommandExecutor(f"Mailcow backup ({backup_type})"):
-                cmd = [backup_script, 'backup', backup_type]
+                cmd = [backup_script, 'backup', backup_type, '--delete-days', '7']
                 returncode, stdout, stderr = run_command(
                     cmd,
                     check=True,
@@ -446,6 +448,68 @@ class BackupManager:
             logger.error("Mailcow backup timed out")
             return False
 
+    def backup_mailcow_directory(self, verify: bool = True) -> bool:
+        """
+        Backup Mailcow installation directory (configuration and certificates)
+
+        This backs up /opt/mailcow-dockerized including:
+        - mailcow.conf
+        - docker-compose.yml and related files
+        - SSL certificates
+        - DKIM keys
+        - Configuration files
+
+        Args:
+            verify: Verify backup after creation
+
+        Returns:
+            True if successful
+        """
+        logger.info("Starting Mailcow directory backup")
+
+        # Get configuration
+        mailcow_path = self.mailcow_config['install_path']
+        repo = self._get_borg_repo('mailcow-directory')
+
+        # Pre-backup checks
+        if not self._pre_backup_checks('mailcow-directory', required_gb=5):
+            return False
+
+        # Check if mailcow directory exists
+        if not os.path.exists(mailcow_path):
+            logger.error(f"Mailcow directory not found: {mailcow_path}")
+            return False
+
+        # Create archive name with timestamp
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        archive_name = f"{self.hostname}-mailcow-directory-{timestamp}"
+
+        # Exclude patterns - we don't need backups, logs, or temporary data
+        excludes = [
+            '*/backups/*',      # Old backup location (if any remain)
+            '*.log',            # Log files
+            '*/logs/*',         # Log directories
+            '*/.git/*',         # Git metadata
+            '*/tmp/*',          # Temporary files
+            '*/data/redis/*',   # Redis temporary data (regenerated)
+        ]
+
+        # Create backup
+        if not self._create_borg_backup(repo, archive_name, mailcow_path, excludes):
+            return False
+
+        # Verify backup
+        if verify:
+            if not self.verify_backup(repo, archive_name):
+                logger.error("Backup verification failed")
+                return False
+
+        # Prune old backups
+        self.prune_old_backups(repo)
+
+        logger.info("Mailcow directory backup completed successfully")
+        return True
+
     def get_backup_status(self) -> Dict[str, any]:
         """
         Get status of all backups
@@ -455,7 +519,7 @@ class BackupManager:
         """
         status = {}
 
-        for service in ['nginx', 'mailcow']:
+        for service in ['nginx', 'mailcow', 'mailcow-directory']:
             repo = self._get_borg_repo(service)
             backups = self.list_backups(repo)
 

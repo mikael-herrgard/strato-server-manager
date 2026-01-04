@@ -42,6 +42,7 @@ system:
 backup:
   local_staging: /var/backups/local    # Local staging area for backups
   schedule:
-    nginx: "0 2 * * *"             # Cron schedule for nginx backups (2 AM daily)
-    mailcow: "0 3 * * *"           # Cron schedule for mailcow backups (3 AM daily)
-    scripts: "0 4 * * 0"           # Cron schedule for scripts backup (4 AM Sunday)
+    nginx: "0 2 * * *"                     # Cron schedule for nginx backups (2 AM daily)
+    mailcow-directory: "30 2 * * *"        # Cron schedule for mailcow directory backups (2:30 AM daily)
+    mailcow: "0 3 * * *"                   # Cron schedule for mailcow data backups (3 AM daily)
+    scripts: "0 4 * * 0"                   # Cron schedule for scripts backup (4 AM Sunday)

@@ -493,3 +493,108 @@ class RestoreManager:
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
 
+    def restore_mailcow_directory(self, backup_name: str = "latest") -> bool:
+        """
+        Restore Mailcow directory (configuration and certificates) from backup
+
+        This restores /opt/mailcow-dockerized including:
+        - mailcow.conf
+        - docker-compose.yml and related files
+        - SSL certificates
+        - DKIM keys
+        - Configuration files
+
+        Args:
+            backup_name: Backup name to restore ("latest" for most recent)
+
+        Returns:
+            True if successful
+        """
+        logger.info(f"Starting Mailcow directory restore (backup: {backup_name})")
+
+        # Get Mailcow configuration
+        mailcow_path = self.mailcow_config['install_path']
+        repo = self._get_borg_repo('mailcow-directory')
+
+        # Get backup list
+        backups = self.list_remote_backups('mailcow-directory')
+        if not backups:
+            logger.error("No Mailcow directory backups found")
+            return False
+
+        # Select backup
+        if backup_name == "latest":
+            selected_backup = backups[0]['name']
+            logger.info(f"Using latest backup: {selected_backup}")
+        else:
+            selected_backup = backup_name
+
+        # Check disk space
+        if not check_disk_space(self.local_staging, 5):
+            logger.error("Insufficient disk space for restore")
+            return False
+
+        # Backup existing installation if it exists
+        if os.path.exists(mailcow_path):
+            # Stop mailcow services first
+            logger.info("Stopping Mailcow services...")
+            self._stop_service(mailcow_path)
+
+            # Backup existing directory
+            backup_path = self._backup_existing_installation(mailcow_path, 'mailcow-directory')
+            if backup_path:
+                logger.info(f"Existing installation saved to: {backup_path}")
+
+            # Remove existing installation
+            logger.info(f"Removing existing installation: {mailcow_path}")
+            shutil.rmtree(mailcow_path)
+
+        # Create temporary extraction directory
+        temp_dir = os.path.join(
+            self.local_staging,
+            f'restore-mailcow-directory-{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+        )
+        ensure_directory(temp_dir)
+
+        try:
+            # Extract backup
+            if not self._extract_backup(repo, selected_backup, temp_dir):
+                return False
+
+            # Find extracted mailcow directory
+            extracted_mailcow = os.path.join(temp_dir, mailcow_path.lstrip('/'))
+
+            if not os.path.exists(extracted_mailcow):
+                logger.error(f"Mailcow directory not found in backup: {extracted_mailcow}")
+                return False
+
+            # Move to target location
+            logger.info(f"Moving Mailcow directory to: {mailcow_path}")
+            ensure_directory(os.path.dirname(mailcow_path))
+            shutil.move(extracted_mailcow, mailcow_path)
+
+            # Set permissions
+            logger.info("Setting permissions...")
+            os.system(f"chown -R root:root {mailcow_path}")
+            os.system(f"chmod +x {mailcow_path}/generate_config.sh 2>/dev/null || true")
+            os.system(f"chmod +x {mailcow_path}/update.sh 2>/dev/null || true")
+
+            logger.info("Mailcow directory restore completed successfully")
+            logger.info("")
+            logger.info("Next steps for full recovery:")
+            logger.info(f"  1. Pull Docker images: cd {mailcow_path} && docker compose pull")
+            logger.info(f"  2. Start services: docker compose up -d")
+            logger.info(f"  3. If restoring data: docker compose down")
+            logger.info(f"  4. Restore mailcow data backup using backup_and_restore.sh")
+            logger.info(f"  5. Start services again: docker compose up -d")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Mailcow directory restore failed: {e}", exc_info=True)
+            return False
+        finally:
+            # Cleanup temp directory
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+

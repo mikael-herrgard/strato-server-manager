@@ -54,7 +54,7 @@ class SchedulingHandlers:
 
             # Build schedule display
             text = "Current Scheduled Tasks\n"
-            text += "=" * 60 + "\n\n"
+            text += "=" * 95 + "\n\n"
 
             for job in schedule['jobs']:
                 text += f"Job Type: {job['type']}\n"
@@ -65,7 +65,8 @@ class SchedulingHandlers:
                 if next_run:
                     text += f"  Next Run: {next_run}\n"
 
-                text += f"  Command: {job['command'][:80]}...\n" if len(job['command']) > 80 else f"  Command: {job['command']}\n"
+                # Display full command path without truncation for better visibility
+                text += f"  Command: {job['command']}\n"
                 text += "\n"
 
             self.ui.show_scrollable_text(text, "Current Schedules")
@@ -82,7 +83,8 @@ class SchedulingHandlers:
             # Select service
             services = [
                 ("nginx", "nginx Proxy Manager"),
-                ("mailcow", "Mailcow Mail Server"),
+                ("mailcow", "Mailcow Data Backup"),
+                ("mailcow-directory", "Mailcow Directory (Config & Certificates)"),
                 ("application", "Server Manager Application")
             ]
 
@@ -90,8 +92,8 @@ class SchedulingHandlers:
                 "Select service to schedule backup:",
                 title="Schedule Backup",
                 choices=services,
-                width=60,
-                height=15
+                width=80,
+                height=16
             )
 
             if code != self.ui.d.OK:
@@ -579,7 +581,7 @@ class SchedulingHandlers:
             status = notif_mgr.get_notification_status()
 
             text = "Email Notification Status\n"
-            text += "=" * 60 + "\n\n"
+            text += "=" * 95 + "\n\n"
 
             text += f"Configured: {'Yes' if status['configured'] else 'No'}\n"
             text += f"Enabled: {'Yes' if status['enabled'] else 'No'}\n\n"
