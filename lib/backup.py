@@ -510,6 +510,57 @@ class BackupManager:
         logger.info("Mailcow directory backup completed successfully")
         return True
 
+    def backup_server_manager(self, verify: bool = True) -> bool:
+        """
+        Backup server-manager configuration files
+
+        This backs up /opt/server-manager/config/ including:
+        - settings.yaml
+        - notifications.yaml
+
+        Args:
+            verify: Verify backup after creation
+
+        Returns:
+            True if successful
+        """
+        logger.info("Starting server-manager config backup")
+
+        config_path = '/opt/server-manager/config'
+        repo = self._get_borg_repo('server-manager')
+
+        # Pre-backup checks
+        if not self._pre_backup_checks('server-manager', required_gb=1):
+            return False
+
+        if not os.path.exists(config_path):
+            logger.error(f"Config directory not found: {config_path}")
+            return False
+
+        # Create archive name with timestamp
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        archive_name = f"{self.hostname}-server-manager-{timestamp}"
+
+        excludes = [
+            '*.example*',
+        ]
+
+        # Create backup
+        if not self._create_borg_backup(repo, archive_name, config_path, excludes):
+            return False
+
+        # Verify backup
+        if verify:
+            if not self.verify_backup(repo, archive_name):
+                logger.error("Backup verification failed")
+                return False
+
+        # Prune old backups
+        self.prune_old_backups(repo)
+
+        logger.info("Server-manager config backup completed successfully")
+        return True
+
     def get_backup_status(self) -> Dict[str, any]:
         """
         Get status of all backups
@@ -519,7 +570,7 @@ class BackupManager:
         """
         status = {}
 
-        for service in ['nginx', 'mailcow', 'mailcow-directory']:
+        for service in ['nginx', 'mailcow', 'mailcow-directory', 'server-manager']:
             repo = self._get_borg_repo(service)
             backups = self.list_backups(repo)
 

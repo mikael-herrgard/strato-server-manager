@@ -228,9 +228,6 @@ class SchedulingManager:
         if options.get('verify'):
             cmd += " --verify"
 
-        if options.get('remote'):
-            cmd += " --remote"
-
         # Redirect output to log file
         cmd += f" >> {log_file} 2>&1"
 

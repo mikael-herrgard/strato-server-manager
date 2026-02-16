@@ -67,14 +67,14 @@ class BackupHandlers:
             ("db", "Database only", False)
         ]
 
-        code, backup_type = self.ui.show_radiolist(
+        backup_type = self.ui.show_radiolist(
             backup_types,
+            "Mailcow Backup Type",
             "Select Mailcow backup type:\n\n"
-            "Complete backup includes all data and is recommended.",
-            "Mailcow Backup Type"
+            "Complete backup includes all data and is recommended."
         )
 
-        if code != self.ui.d.OK:
+        if backup_type is None:
             return
 
         if not self.ui.confirm_action(

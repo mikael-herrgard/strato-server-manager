@@ -76,11 +76,11 @@ class ConfigManager:
             'mailcow': {
                 'install_path': '/opt/mailcow-dockerized',
                 'backup_types': ['all'],
-                'domain': 'mail.example.com'
+                'domain': 'mail.villaherrgard.com'
             },
             'nginx': {
                 'install_path': '/root/nginx',
-                'domain': 'nginx.example.com'
+                'domain': 'nginx.villaherrgard.com'
             },
             'system': {
                 'ipv6_enabled': False,
@@ -266,26 +266,6 @@ class ConfigManager:
 
         # Try .env file in /root
         env_file = '/root/.env'
-        if os.path.exists(env_file):
-            try:
-                with open(env_file, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line.startswith('#') or '=' not in line:
-                            continue
-
-                        k, v = line.split('=', 1)
-                        k = k.strip()
-                        v = v.strip().strip("'\"")
-
-                        if k.upper() == key.upper():
-                            return v
-
-            except Exception as e:
-                logger.error(f"Error reading .env file: {e}")
-
-        # Try .env file in sh-scripts directory
-        env_file = '/root/sh-scripts/.env'
         if os.path.exists(env_file):
             try:
                 with open(env_file, 'r') as f:

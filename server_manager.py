@@ -342,52 +342,11 @@ For help, see: /opt/server-manager/README.md
             elif choice == "0" or choice == "back":
                 break
 
-    # Placeholder methods (not yet refactored/implemented)
+    # Placeholder methods for features not yet implemented
     def _install_portainer_placeholder(self):
         """Install Portainer (placeholder)"""
         self.ui.show_info(
             "Portainer installation will be implemented in a future phase.",
-            "Coming Soon"
-        )
-
-    def _network_settings_placeholder(self):
-        """Network settings (placeholder)"""
-        self.ui.show_info(
-            "Network settings configuration will be implemented in a future phase.",
-            "Coming Soon"
-        )
-
-    def _cleanup_backups_placeholder(self):
-        """Cleanup old backups (placeholder)"""
-        self.ui.show_info(
-            "Automated backup cleanup will be implemented in Phase 6.",
-            "Coming Soon"
-        )
-
-    def _backup_history_placeholder(self):
-        """View backup history (placeholder)"""
-        self.ui.show_info(
-            "Backup history viewing will be implemented in Phase 6.",
-            "Coming Soon"
-        )
-
-    def _configure_rsync_placeholder(self):
-        """Configure rsync settings (placeholder)"""
-        self.ui.show_info(
-            "rsync configuration will be implemented in a future phase.",
-            "Coming Soon"
-        )
-
-    def _configure_backup_schedule_placeholder(self):
-        """Configure backup schedule (placeholder - now redirects to scheduling)"""
-        self._scheduling_menu()
-
-    def _set_backup_retention_placeholder(self):
-        """Set backup retention (placeholder)"""
-        self.ui.show_info(
-            "Backup retention configuration will be implemented in a future phase.\n\n"
-            "For now, use the scheduled cleanup feature:\n"
-            "  Main Menu → Scheduling & Automation → Schedule Cleanup",
             "Coming Soon"
         )
 
