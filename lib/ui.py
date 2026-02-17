@@ -77,10 +77,12 @@ class ServerManagerUI:
             ("1", "Backup nginx Proxy Manager"),
             ("2", "Backup Mailcow Data"),
             ("3", "Backup Mailcow Directory"),
-            ("4", "Backup Server-Manager Config"),
-            ("5", "Backup All Services"),
-            ("6", "View Backup Status"),
-            ("7", "Configure Backup Schedule"),
+            ("4", "Backup Monitoring Stack"),
+            ("5", "Backup Server-Manager Config"),
+            ("6", "Backup All Services"),
+            ("7", "View Backup Status"),
+            ("8", "Initialize Backup Repositories"),
+            ("9", "Configure Backup Schedule"),
             ("0", "Back to Main Menu")
         ]
 
@@ -109,7 +111,8 @@ class ServerManagerUI:
             ("1", "Restore nginx Proxy Manager"),
             ("2", "Restore Mailcow Directory"),
             ("3", "Restore Mailcow Data"),
-            ("4", "List Available Backups"),
+            ("4", "Restore Monitoring Stack"),
+            ("5", "List Available Backups"),
             ("0", "Back to Main Menu")
         ]
 

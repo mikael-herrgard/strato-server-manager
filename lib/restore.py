@@ -15,7 +15,10 @@ from .utils import (
     check_disk_space,
     ensure_directory,
     safe_delete,
-    CommandExecutor
+    CommandExecutor,
+    stop_systemd_service,
+    start_systemd_service,
+    verify_systemd_service
 )
 from .config import get_config
 
@@ -639,6 +642,155 @@ class RestoreManager:
 
         except Exception as e:
             logger.error(f"Mailcow directory restore failed: {e}", exc_info=True)
+            return False
+        finally:
+            # Cleanup temp directory
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+
+    def restore_monitoring_stack(self, backup_name: str = "latest") -> bool:
+        """
+        Restore monitoring stack (Grafana, InfluxDB, pressuresuite-influx-bridge) from backup
+
+        Args:
+            backup_name: Backup name to restore ("latest" for most recent)
+
+        Returns:
+            True if successful
+        """
+        logger.info(f"Starting monitoring stack restore (backup: {backup_name})")
+
+        # Get configuration
+        monitoring_config = self.config.get_monitoring_stack_config()
+        repo = self._get_borg_repo('monitoring-stack')
+
+        # Get backup list
+        backups = self.list_remote_backups('monitoring-stack')
+        if not backups:
+            logger.error("No monitoring stack backups found")
+            return False
+
+        # Select backup
+        if backup_name == "latest":
+            selected_backup = backups[0]['name']
+            logger.info(f"Using latest backup: {selected_backup}")
+        else:
+            selected_backup = backup_name
+
+        # Check disk space
+        if not check_disk_space(self.local_staging, 1):
+            logger.error("Insufficient disk space for restore")
+            return False
+
+        # Paths to restore
+        grafana_data = monitoring_config['grafana_data_path']
+        grafana_config = monitoring_config['grafana_config_path']
+        influxdb_data = monitoring_config['influxdb_data_path']
+        influxdb_config = monitoring_config['influxdb_config_path']
+        bridge_path = monitoring_config['bridge_install_path']
+        bridge_service = monitoring_config['bridge_service']
+        bridge_timer = monitoring_config['bridge_timer']
+
+        # Stop services
+        logger.info("Stopping monitoring services...")
+        services_to_stop = ['grafana-server', 'influxdb', bridge_timer]
+        for svc in services_to_stop:
+            if verify_systemd_service(svc):
+                stop_systemd_service(svc)
+
+        # Create temporary extraction directory
+        temp_dir = os.path.join(
+            self.local_staging,
+            f'restore-monitoring-stack-{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+        )
+        ensure_directory(temp_dir)
+
+        try:
+            # Backup existing directories
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            for path in [grafana_data, influxdb_data, bridge_path]:
+                if os.path.exists(path):
+                    backup_path = f"{path}.pre-restore.{timestamp}"
+                    logger.info(f"Backing up {path} to {backup_path}")
+                    shutil.copytree(path, backup_path, symlinks=True)
+
+            # Extract backup
+            if not self._extract_backup(repo, selected_backup, temp_dir):
+                return False
+
+            # Restore each component from extracted archive
+            restore_mappings = [
+                (grafana_data, grafana_data),
+                (grafana_config, grafana_config),
+                (influxdb_data, influxdb_data),
+                (influxdb_config, influxdb_config),
+                (bridge_path, bridge_path),
+            ]
+
+            for target_path, source_rel in restore_mappings:
+                extracted_path = os.path.join(temp_dir, source_rel.lstrip('/'))
+
+                if not os.path.exists(extracted_path):
+                    logger.warning(f"Path not found in backup: {extracted_path}")
+                    continue
+
+                # Remove existing and move extracted
+                if os.path.exists(target_path):
+                    logger.info(f"Removing existing: {target_path}")
+                    shutil.rmtree(target_path)
+
+                logger.info(f"Restoring: {target_path}")
+                ensure_directory(os.path.dirname(target_path))
+                shutil.move(extracted_path, target_path)
+
+            # Restore systemd unit files if present in backup
+            for unit_file in [bridge_service, bridge_timer]:
+                extracted_unit = os.path.join(temp_dir, 'etc/systemd/system', unit_file)
+                target_unit = f"/etc/systemd/system/{unit_file}"
+                if os.path.exists(extracted_unit):
+                    logger.info(f"Restoring systemd unit: {unit_file}")
+                    shutil.copy2(extracted_unit, target_unit)
+
+            # Set permissions
+            logger.info("Setting permissions...")
+            os.system(f"chown -R grafana:grafana {grafana_data}")
+            os.system(f"chown -R grafana:grafana {grafana_config}")
+            os.system(f"chown -R influxdb:influxdb {influxdb_data}")
+            os.system(f"chown -R influxdb:influxdb {influxdb_config}")
+
+            # Reload systemd in case units changed
+            logger.info("Reloading systemd daemon...")
+            run_command(['systemctl', 'daemon-reload'], check=False, timeout=30)
+
+            # Start services
+            logger.info("Starting monitoring services...")
+            start_systemd_service('influxdb')
+            start_systemd_service('grafana-server')
+
+            # Enable and start the bridge timer
+            run_command(['systemctl', 'enable', bridge_timer], check=False, timeout=30)
+            start_systemd_service(bridge_timer)
+
+            # Wait for services to start
+            import time
+            time.sleep(5)
+
+            # Verify services
+            all_running = True
+            for svc in ['influxdb', 'grafana-server']:
+                if not verify_systemd_service(svc):
+                    logger.warning(f"Service may not be running properly: {svc}")
+                    all_running = False
+
+            if all_running:
+                logger.info("Monitoring stack restore completed successfully")
+            else:
+                logger.warning("Monitoring stack restored but some services may not be running properly")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Monitoring stack restore failed: {e}", exc_info=True)
             return False
         finally:
             # Cleanup temp directory

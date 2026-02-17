@@ -228,12 +228,16 @@ For help, see: /opt/server-manager/README.md
             elif choice == "3":
                 self.backup_handlers.handle_backup_mailcow_directory()
             elif choice == "4":
-                self.backup_handlers.handle_backup_server_manager()
+                self.backup_handlers.handle_backup_monitoring_stack()
             elif choice == "5":
-                self.backup_handlers.handle_backup_all()
+                self.backup_handlers.handle_backup_server_manager()
             elif choice == "6":
-                self.backup_handlers.handle_view_backup_status()
+                self.backup_handlers.handle_backup_all()
             elif choice == "7":
+                self.backup_handlers.handle_view_backup_status()
+            elif choice == "8":
+                self.backup_handlers.handle_initialize_repos()
+            elif choice == "9":
                 # Navigate to scheduling menu
                 self._scheduling_menu()
             elif choice == "0" or choice == "back":
@@ -251,6 +255,8 @@ For help, see: /opt/server-manager/README.md
             elif choice == "3":
                 self.restore_handlers.handle_restore_mailcow()
             elif choice == "4":
+                self.restore_handlers.handle_restore_monitoring_stack()
+            elif choice == "5":
                 self.restore_handlers.handle_list_backups()
             elif choice == "0" or choice == "back":
                 break

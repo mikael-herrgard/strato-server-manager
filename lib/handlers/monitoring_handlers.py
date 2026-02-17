@@ -227,7 +227,7 @@ class MonitoringHandlers:
             history_text += "=" * 95 + "\n"
             history_text += "Storage: Remote rsync server via Borg repositories\n\n"
 
-            for service in ['nginx', 'mailcow-directory', 'mailcow', 'server-manager']:
+            for service in ['nginx', 'mailcow-directory', 'mailcow', 'server-manager', 'monitoring-stack']:
                 try:
                     backups = restore_mgr.list_remote_backups(service)
 

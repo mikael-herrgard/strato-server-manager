@@ -16,6 +16,21 @@ from .config import get_config
 class SchedulingManager:
     """Manages automated task scheduling"""
 
+    BACKUP_QUEUE = [
+        {'service': 'nginx',             'frequency': 'daily',  'offset_minutes': 0},
+        {'service': 'mailcow-directory', 'frequency': 'daily',  'offset_minutes': 30},
+        {'service': 'mailcow',           'frequency': 'daily',  'offset_minutes': 60},
+        {'service': 'server-manager',    'frequency': 'weekly', 'offset_minutes': 180},
+        {'service': 'monitoring-stack',  'frequency': 'weekly', 'offset_minutes': 210},
+    ]
+
+    BACKUP_WINDOWS = {
+        'night':     {'hour': 2,  'label': 'Night (02:00)'},
+        'morning':   {'hour': 8,  'label': 'Morning (08:00)'},
+        'afternoon': {'hour': 14, 'label': 'Afternoon (14:00)'},
+        'evening':   {'hour': 20, 'label': 'Evening (20:00)'},
+    }
+
     def __init__(self):
         """Initialize scheduling manager"""
         self.config = get_config()
@@ -104,19 +119,21 @@ class SchedulingManager:
 
     def _identify_job_type(self, command: str) -> str:
         """
-        Identify the type of scheduled job
+        Identify the type of scheduled job by extracting the service name
+        from the automated-backup.sh command.
 
         Args:
             command: Cron command
 
         Returns:
-            Job type identifier
+            Job type identifier (e.g., 'backup_nginx', 'backup_monitoring-stack')
         """
-        if 'backup-nginx' in command or 'backup_nginx' in command:
-            return 'backup_nginx'
-        elif 'backup-mailcow' in command or 'backup_mailcow' in command:
-            return 'backup_mailcow'
-        elif 'cleanup' in command:
+        # Extract service name from: automated-backup.sh <service>
+        match = re.search(r'automated-backup\.sh\s+(\S+)', command)
+        if match:
+            return f'backup_{match.group(1)}'
+
+        if 'cleanup' in command:
             return 'cleanup'
         elif 'update' in command:
             return 'update'
@@ -180,6 +197,108 @@ class SchedulingManager:
             logger.error(f"Failed to schedule backup: {e}")
             return False
 
+    def schedule_backup_queue(self, window_key: str) -> bool:
+        """
+        Schedule all backups using the queue-based approach.
+
+        Replaces all existing backup_* cron jobs with a sequenced set
+        based on the chosen time window.
+
+        Args:
+            window_key: One of 'night', 'morning', 'afternoon', 'evening'
+
+        Returns:
+            True if scheduled successfully
+        """
+        try:
+            window = self.BACKUP_WINDOWS.get(window_key)
+            if not window:
+                raise ValueError(f"Invalid backup window: {window_key}")
+
+            start_hour = window['hour']
+
+            # Build new backup jobs from the queue
+            new_backup_jobs = []
+            for entry in self.BACKUP_QUEUE:
+                total_minutes = start_hour * 60 + entry['offset_minutes']
+                cron_hour = total_minutes // 60
+                cron_minute = total_minutes % 60
+
+                if entry['frequency'] == 'daily':
+                    schedule = f"{cron_minute} {cron_hour} * * *"
+                else:  # weekly (Sunday)
+                    schedule = f"{cron_minute} {cron_hour} * * 0"
+
+                cmd = self._build_backup_command(entry['service'], {'verify': True})
+
+                new_backup_jobs.append({
+                    'minute': str(cron_minute),
+                    'hour': str(cron_hour),
+                    'day': '*',
+                    'month': '*',
+                    'weekday': '*' if entry['frequency'] == 'daily' else '0',
+                    'command': cmd,
+                    'schedule': schedule,
+                    'type': f"backup_{entry['service']}"
+                })
+
+            # Get current crontab and remove all existing backup_* jobs
+            current = self.get_current_schedule()
+            non_backup_jobs = [
+                j for j in current.get('jobs', [])
+                if not j['type'].startswith('backup_')
+            ]
+
+            # Combine non-backup jobs with new backup queue
+            all_jobs = non_backup_jobs + new_backup_jobs
+
+            # Write the full crontab
+            self._write_crontab(all_jobs)
+
+            # Persist the window choice in config
+            self.config.set('backup.window', window_key)
+            self.config.save_config()
+
+            logger.info(f"Backup queue scheduled with window '{window_key}' (start: {start_hour:02d}:00)")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to schedule backup queue: {e}")
+            return False
+
+    def get_backup_queue_description(self, window_key: str) -> str:
+        """
+        Return a formatted preview of the backup queue for a given window.
+
+        Args:
+            window_key: One of 'night', 'morning', 'afternoon', 'evening'
+
+        Returns:
+            Formatted string showing each service, its time, and frequency
+        """
+        window = self.BACKUP_WINDOWS.get(window_key)
+        if not window:
+            return f"Unknown window: {window_key}"
+
+        start_hour = window['hour']
+        lines = [f"Backup Queue - {window['label']}", "=" * 50, ""]
+        lines.append(f"{'Slot':<6}{'Service':<22}{'Time':<10}{'Frequency'}")
+        lines.append("-" * 50)
+
+        for i, entry in enumerate(self.BACKUP_QUEUE, 1):
+            total_minutes = start_hour * 60 + entry['offset_minutes']
+            h = total_minutes // 60
+            m = total_minutes % 60
+            time_str = f"{h:02d}:{m:02d}"
+            freq = "Daily" if entry['frequency'] == 'daily' else "Weekly (Sun)"
+            lines.append(f"{i:<6}{entry['service']:<22}{time_str:<10}{freq}")
+
+        lines.append("")
+        lines.append("Daily jobs run every night.")
+        lines.append("Weekly jobs run on Sunday only.")
+
+        return "\n".join(lines)
+
     def _validate_cron_schedule(self, schedule: str) -> bool:
         """
         Validate cron schedule expression
@@ -211,7 +330,7 @@ class SchedulingManager:
 
     def _build_backup_command(self, service: str, options: Dict) -> str:
         """
-        Build backup command for cron
+        Build backup command for cron with flock to prevent concurrent runs
 
         Args:
             service: Service name
@@ -222,14 +341,18 @@ class SchedulingManager:
         """
         script_path = "/opt/server-manager/scripts/automated-backup.sh"
         log_file = f"/opt/server-manager/logs/backup-{service}-cron.log"
+        lock_file = f"/tmp/backup-{service}.lock"
 
-        cmd = f"{script_path} {service}"
+        backup_cmd = f"{script_path} {service}"
 
         if options.get('verify'):
-            cmd += " --verify"
+            backup_cmd += " --verify"
 
         # Redirect output to log file
-        cmd += f" >> {log_file} 2>&1"
+        backup_cmd += f" >> {log_file} 2>&1"
+
+        # Wrap in flock to prevent concurrent runs
+        cmd = f"flock -n {lock_file} {backup_cmd}"
 
         return cmd
 

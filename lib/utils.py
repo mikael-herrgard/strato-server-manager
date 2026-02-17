@@ -376,6 +376,89 @@ def validate_backup_name(name: str) -> bool:
     return True
 
 
+def stop_systemd_service(service_name: str) -> bool:
+    """
+    Stop a systemd service
+
+    Args:
+        service_name: Name of the systemd service (e.g., 'grafana-server')
+
+    Returns:
+        True if successful
+    """
+    logger.info(f"Stopping systemd service: {service_name}")
+
+    try:
+        returncode, stdout, stderr = run_command(
+            ['systemctl', 'stop', service_name],
+            check=True,
+            timeout=60
+        )
+        logger.info(f"Service stopped: {service_name}")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to stop service {service_name}: {e}")
+        return False
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout stopping service: {service_name}")
+        return False
+
+
+def start_systemd_service(service_name: str) -> bool:
+    """
+    Start a systemd service
+
+    Args:
+        service_name: Name of the systemd service (e.g., 'grafana-server')
+
+    Returns:
+        True if successful
+    """
+    logger.info(f"Starting systemd service: {service_name}")
+
+    try:
+        returncode, stdout, stderr = run_command(
+            ['systemctl', 'start', service_name],
+            check=True,
+            timeout=60
+        )
+        logger.info(f"Service started: {service_name}")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to start service {service_name}: {e}")
+        return False
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout starting service: {service_name}")
+        return False
+
+
+def verify_systemd_service(service_name: str) -> bool:
+    """
+    Verify a systemd service is active
+
+    Args:
+        service_name: Name of the systemd service
+
+    Returns:
+        True if service is active
+    """
+    try:
+        returncode, stdout, stderr = run_command(
+            ['systemctl', 'is-active', service_name],
+            check=False,
+            timeout=10
+        )
+        is_active = stdout.strip() == 'active'
+        if is_active:
+            logger.info(f"Service is active: {service_name}")
+        else:
+            logger.warning(f"Service is not active: {service_name} (status: {stdout.strip()})")
+        return is_active
+    except Exception as e:
+        logger.error(f"Failed to verify service {service_name}: {e}")
+        return False
+
+
 class CommandExecutor:
     """Context manager for executing commands with logging"""
 

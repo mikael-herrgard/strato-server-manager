@@ -89,11 +89,7 @@ class ConfigManager:
             },
             'backup': {
                 'local_staging': '/var/backups/local',
-                'schedule': {
-                    'nginx': '0 2 * * *',      # 2 AM daily
-                    'mailcow': '0 3 * * *',    # 3 AM daily
-                    'scripts': '0 4 * * 0'     # 4 AM weekly (Sunday)
-                }
+                'window': 'night',
             }
         }
 
@@ -204,6 +200,7 @@ class ConfigManager:
         return {
             'remote_path': self.get('borg.remote_path', 'borg14'),
             'compression': self.get('borg.compression', 'zstd,3'),
+            'encryption': self.get('borg.encryption', 'repokey'),
             'retention': self.get('borg.retention', {
                 'daily': 7,
                 'weekly': 4,
@@ -238,15 +235,23 @@ class ConfigManager:
             'domain': self.get('nginx.domain', 'nginx.example.com')
         }
 
+    def get_monitoring_stack_config(self) -> Dict[str, Any]:
+        """Get monitoring stack configuration (Grafana/InfluxDB/pressuresuite bridge)"""
+        return {
+            'grafana_data_path': self.get('monitoring-stack.grafana_data_path', '/var/lib/grafana'),
+            'grafana_config_path': self.get('monitoring-stack.grafana_config_path', '/etc/grafana'),
+            'influxdb_data_path': self.get('monitoring-stack.influxdb_data_path', '/var/lib/influxdb'),
+            'influxdb_config_path': self.get('monitoring-stack.influxdb_config_path', '/etc/influxdb'),
+            'bridge_install_path': self.get('monitoring-stack.bridge_install_path', '/root/python/pressuresuite-influx-bridge'),
+            'bridge_service': self.get('monitoring-stack.bridge_service', 'pressuresuite-influx-bridge.service'),
+            'bridge_timer': self.get('monitoring-stack.bridge_timer', 'pressuresuite-influx-bridge.timer'),
+        }
+
     def get_backup_config(self) -> Dict[str, Any]:
         """Get backup-specific configuration"""
         return {
             'local_staging': self.get('backup.local_staging', '/var/backups/local'),
-            'schedule': self.get('backup.schedule', {
-                'nginx': '0 2 * * *',
-                'mailcow': '0 3 * * *',
-                'scripts': '0 4 * * 0'
-            })
+            'window': self.get('backup.window', 'night'),
         }
 
     def get_secret(self, key: str) -> Optional[str]:

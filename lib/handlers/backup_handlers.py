@@ -179,6 +179,48 @@ class BackupHandlers:
             logger.error(f"Server-Manager config backup error: {e}")
             self.ui.show_error(f"Backup failed:\n\n{e}")
 
+    def handle_backup_monitoring_stack(self):
+        """Backup Monitoring Stack (Grafana/InfluxDB/pressuresuite bridge)"""
+        if not self.ui.confirm_action(
+            "This will create a backup of the Monitoring Stack.\n\n"
+            "The backup includes:\n"
+            "  • Grafana dashboards, config, and plugins\n"
+            "  • InfluxDB time-series data and config\n"
+            "  • pressuresuite-influx-bridge code and credentials\n"
+            "  • Associated systemd service/timer units\n\n"
+            "NOTE: Grafana and InfluxDB will be briefly stopped\n"
+            "during the backup for data consistency.\n\n"
+            "The backup will be stored on your rsync server.\n\n"
+            "Continue?",
+            "Backup Monitoring Stack"
+        ):
+            return
+
+        try:
+            backup_mgr = self._get_backup_manager()
+
+            self.ui.show_infobox(
+                "Creating monitoring stack backup...\n\n"
+                "Stopping Grafana and InfluxDB for consistent snapshot.\n"
+                "This may take a few minutes."
+            )
+
+            success = backup_mgr.backup_monitoring_stack(verify=True)
+
+            if success:
+                self.ui.show_success(
+                    "Monitoring stack backup completed successfully!\n\n"
+                    "The backup has been stored on your rsync server and verified.\n"
+                    "Grafana and InfluxDB have been restarted."
+                )
+                logger.info("Monitoring stack backup completed via TUI")
+            else:
+                self.ui.show_error("Monitoring stack backup failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Monitoring stack backup error: {e}")
+            self.ui.show_error(f"Backup failed:\n\n{e}")
+
     def handle_backup_all(self):
         """Backup all services in sequence"""
         if not self.ui.confirm_action(
@@ -186,7 +228,8 @@ class BackupHandlers:
             "  1. nginx Proxy Manager\n"
             "  2. Mailcow Directory\n"
             "  3. Mailcow Data (complete)\n"
-            "  4. Server-Manager Config\n\n"
+            "  4. Monitoring Stack\n"
+            "  5. Server-Manager Config\n\n"
             "This may take 30-90 minutes depending on data volume.\n\n"
             "Continue?",
             "Backup All Services"
@@ -199,19 +242,23 @@ class BackupHandlers:
             results = {}
 
             # 1. nginx
-            self.ui.show_infobox("Backing up nginx Proxy Manager...\n\n(Step 1 of 4)")
+            self.ui.show_infobox("Backing up nginx Proxy Manager...\n\n(Step 1 of 5)")
             results['nginx'] = backup_mgr.backup_nginx(verify=True)
 
             # 2. Mailcow Directory
-            self.ui.show_infobox("Backing up Mailcow Directory...\n\n(Step 2 of 4)")
+            self.ui.show_infobox("Backing up Mailcow Directory...\n\n(Step 2 of 5)")
             results['mailcow-directory'] = backup_mgr.backup_mailcow_directory(verify=True)
 
             # 3. Mailcow Data
-            self.ui.show_infobox("Backing up Mailcow Data...\n\n(Step 3 of 4)\nThis may take a while...")
+            self.ui.show_infobox("Backing up Mailcow Data...\n\n(Step 3 of 5)\nThis may take a while...")
             results['mailcow'] = backup_mgr.backup_mailcow(backup_type='all', verify=True)
 
-            # 4. Server-Manager
-            self.ui.show_infobox("Backing up Server-Manager Config...\n\n(Step 4 of 4)")
+            # 4. Monitoring Stack
+            self.ui.show_infobox("Backing up Monitoring Stack...\n\n(Step 4 of 5)")
+            results['monitoring-stack'] = backup_mgr.backup_monitoring_stack(verify=True)
+
+            # 5. Server-Manager
+            self.ui.show_infobox("Backing up Server-Manager Config...\n\n(Step 5 of 5)")
             results['server-manager'] = backup_mgr.backup_server_manager(verify=True)
 
             # Build summary
@@ -264,3 +311,53 @@ class BackupHandlers:
         except Exception as e:
             logger.error(f"Failed to get backup status: {e}")
             self.ui.show_error(f"Failed to get backup status:\n\n{e}")
+
+    def handle_initialize_repos(self):
+        """Initialize all Borg backup repositories on remote server"""
+        if not self.ui.confirm_action(
+            "This will check and initialize all Borg backup repositories\n"
+            "on the remote rsync server.\n\n"
+            "Repositories:\n"
+            "  • nginx-backup\n"
+            "  • mailcow-backup\n"
+            "  • mailcow-directory-backup\n"
+            "  • server-manager-backup\n"
+            "  • monitoring-stack-backup\n\n"
+            "Existing repositories will be left untouched.\n"
+            "Missing repositories will be created.\n\n"
+            "This is useful when setting up a new backup provider.\n\n"
+            "Continue?",
+            "Initialize Backup Repositories"
+        ):
+            return
+
+        try:
+            backup_mgr = self._get_backup_manager()
+
+            self.ui.show_infobox(
+                "Checking and initializing Borg repositories...\n\n"
+                "This may take a minute."
+            )
+
+            results = backup_mgr.initialize_all_repos()
+
+            # Build summary
+            succeeded = sum(1 for v in results.values() if v)
+            total = len(results)
+
+            summary = f"Repository Initialization: {succeeded}/{total} ready\n\n"
+            for service, success in results.items():
+                icon = "OK" if success else "FAILED"
+                summary += f"  [{icon}] {service}-backup\n"
+
+            if succeeded == total:
+                self.ui.show_success(summary)
+                logger.info("All Borg repositories initialized successfully via TUI")
+            else:
+                summary += "\nCheck logs for details on failed repositories."
+                self.ui.show_error(summary)
+                logger.warning(f"Repository initialization: {succeeded}/{total} succeeded")
+
+        except Exception as e:
+            logger.error(f"Repository initialization error: {e}")
+            self.ui.show_error(f"Initialization failed:\n\n{e}")

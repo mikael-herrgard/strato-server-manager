@@ -36,6 +36,8 @@ def cmd_backup(args):
             success = backup_mgr.backup_mailcow_directory(verify=verify)
         elif service == "server-manager":
             success = backup_mgr.backup_server_manager(verify=verify)
+        elif service == "monitoring-stack":
+            success = backup_mgr.backup_monitoring_stack(verify=verify)
         else:
             print(f"Error: Unknown service: {service}")
             sys.exit(1)
@@ -146,7 +148,7 @@ def main():
     backup_parser = subparsers.add_parser("backup", help="Run a backup")
     backup_parser.add_argument(
         "service",
-        choices=["nginx", "mailcow", "mailcow-directory", "server-manager"],
+        choices=["nginx", "mailcow", "mailcow-directory", "server-manager", "monitoring-stack"],
         help="Service to back up"
     )
     backup_parser.add_argument(

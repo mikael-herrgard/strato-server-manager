@@ -7,7 +7,7 @@ import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from .utils import (
     logger,
     run_command,
@@ -16,7 +16,10 @@ from .utils import (
     validate_backup_name,
     ensure_directory,
     get_hostname,
-    CommandExecutor
+    CommandExecutor,
+    stop_systemd_service,
+    start_systemd_service,
+    verify_systemd_service
 )
 from .config import get_config
 
@@ -64,6 +67,82 @@ class BackupManager:
         # Use relative path format (./path) for rsync.net compatibility
         return f"ssh://{rsync_host}/./{base_path}/{service}-backup"
 
+    # All known service names that have Borg repositories
+    BACKUP_SERVICES = ['nginx', 'mailcow', 'mailcow-directory', 'server-manager', 'monitoring-stack']
+
+    def _ensure_borg_repo(self, repo: str) -> bool:
+        """
+        Ensure a Borg repository exists, initializing it if necessary.
+
+        Uses 'borg info' to check existence. If the repo does not exist,
+        initializes it with the configured encryption mode.
+
+        Args:
+            repo: Borg repository URL
+
+        Returns:
+            True if repo exists or was successfully initialized
+        """
+        logger.info(f"Checking Borg repository: {repo}")
+
+        # Try to access the repo
+        try:
+            returncode, stdout, stderr = run_command(
+                ['borg', 'info', repo],
+                check=False,
+                env=self.borg_env,
+                timeout=60
+            )
+
+            if returncode == 0:
+                logger.info(f"Borg repository exists: {repo}")
+                return True
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout checking Borg repository: {repo}")
+            return False
+
+        # Repository doesn't exist — initialize it
+        encryption = self.borg_config.get('encryption', 'repokey')
+        logger.info(f"Initializing Borg repository: {repo} (encryption: {encryption})")
+
+        try:
+            returncode, stdout, stderr = run_command(
+                ['borg', 'init', f'--encryption={encryption}', repo],
+                check=True,
+                env=self.borg_env,
+                timeout=120
+            )
+
+            logger.info(f"Borg repository initialized: {repo}")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to initialize Borg repository {repo}: {e}")
+            return False
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout initializing Borg repository: {repo}")
+            return False
+
+    def initialize_all_repos(self) -> Dict[str, bool]:
+        """
+        Initialize all Borg backup repositories.
+
+        Checks each known service repo and initializes any that don't exist.
+        Useful when migrating to a new rsync/Borg provider.
+
+        Returns:
+            Dictionary mapping service name to success/failure
+        """
+        logger.info("Initializing all Borg backup repositories")
+
+        results = {}
+        for service in self.BACKUP_SERVICES:
+            repo = self._get_borg_repo(service)
+            results[service] = self._ensure_borg_repo(repo)
+
+        return results
+
     def _pre_backup_checks(self, service: str, required_gb: int = 10) -> bool:
         """
         Perform pre-backup checks
@@ -96,6 +175,12 @@ class BackupManager:
             logger.error("BORG_PASSPHRASE not set")
             return False
 
+        # Ensure Borg repository exists (auto-initialize if missing)
+        repo = self._get_borg_repo(service)
+        if not self._ensure_borg_repo(repo):
+            logger.error(f"Borg repository not available for {service}")
+            return False
+
         logger.info("Pre-backup checks passed")
         return True
 
@@ -103,7 +188,7 @@ class BackupManager:
         self,
         repo: str,
         archive_name: str,
-        source_path: str,
+        source_paths: Union[str, List[str]],
         excludes: Optional[List[str]] = None
     ) -> bool:
         """
@@ -112,7 +197,7 @@ class BackupManager:
         Args:
             repo: Borg repository URL
             archive_name: Archive name
-            source_path: Path to backup
+            source_paths: Path or list of paths to backup
             excludes: List of exclude patterns
 
         Returns:
@@ -120,10 +205,15 @@ class BackupManager:
         """
         logger.info(f"Creating Borg backup: {archive_name}")
 
-        # Check if source exists
-        if not os.path.exists(source_path):
-            logger.error(f"Source path does not exist: {source_path}")
-            return False
+        # Normalize to list
+        if isinstance(source_paths, str):
+            source_paths = [source_paths]
+
+        # Check if all sources exist
+        for source_path in source_paths:
+            if not os.path.exists(source_path):
+                logger.error(f"Source path does not exist: {source_path}")
+                return False
 
         # Build command
         cmd = [
@@ -139,9 +229,9 @@ class BackupManager:
             for pattern in excludes:
                 cmd.extend(['--exclude', pattern])
 
-        # Add archive and source
+        # Add archive and sources
         cmd.append(f"{repo}::{archive_name}")
-        cmd.append(source_path)
+        cmd.extend(source_paths)
 
         try:
             with CommandExecutor(f"Borg backup: {archive_name}"):
@@ -561,6 +651,104 @@ class BackupManager:
         logger.info("Server-manager config backup completed successfully")
         return True
 
+    def backup_monitoring_stack(self, verify: bool = True) -> bool:
+        """
+        Backup monitoring stack (Grafana, InfluxDB, pressuresuite-influx-bridge)
+
+        All three components are backed up as a single archive since they form
+        one logical unit. Grafana and InfluxDB are stopped during backup for
+        data consistency. The Borg repository is auto-initialized if missing.
+
+        Args:
+            verify: Verify backup after creation
+
+        Returns:
+            True if successful
+        """
+        logger.info("Starting monitoring stack backup")
+
+        # Get configuration
+        monitoring_config = self.config.get_monitoring_stack_config()
+        repo = self._get_borg_repo('monitoring-stack')
+
+        # Pre-backup checks
+        if not self._pre_backup_checks('monitoring-stack', required_gb=1):
+            return False
+
+        # Collect source paths and validate they exist
+        source_paths = [
+            monitoring_config['grafana_data_path'],
+            monitoring_config['grafana_config_path'],
+            monitoring_config['influxdb_data_path'],
+            monitoring_config['influxdb_config_path'],
+            monitoring_config['bridge_install_path'],
+        ]
+
+        # Add systemd unit files if they exist
+        bridge_service_path = f"/etc/systemd/system/{monitoring_config['bridge_service']}"
+        bridge_timer_path = f"/etc/systemd/system/{monitoring_config['bridge_timer']}"
+        if os.path.exists(bridge_service_path):
+            source_paths.append(bridge_service_path)
+        if os.path.exists(bridge_timer_path):
+            source_paths.append(bridge_timer_path)
+
+        # Validate all paths exist
+        missing = [p for p in source_paths if not os.path.exists(p)]
+        if missing:
+            logger.error(f"Missing source paths: {missing}")
+            return False
+
+        # Stop services for consistent snapshot
+        logger.info("Stopping monitoring services for consistent backup...")
+        services_to_stop = ['grafana-server', 'influxdb']
+        stopped_services = []
+
+        try:
+            for svc in services_to_stop:
+                if verify_systemd_service(svc):
+                    if stop_systemd_service(svc):
+                        stopped_services.append(svc)
+                    else:
+                        logger.warning(f"Failed to stop {svc}, continuing anyway")
+
+            # Create archive name with timestamp
+            timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+            archive_name = f"{self.hostname}-monitoring-stack-{timestamp}"
+
+            # Exclude patterns
+            excludes = [
+                '*/.git/*',
+                '*/__pycache__/*',
+                '*.log',
+                '*/logs/*',
+            ]
+
+            # Create backup
+            if not self._create_borg_backup(repo, archive_name, source_paths, excludes):
+                return False
+
+            # Verify backup
+            if verify:
+                if not self.verify_backup(repo, archive_name):
+                    logger.error("Backup verification failed")
+                    return False
+
+            # Prune old backups
+            self.prune_old_backups(repo)
+
+            logger.info("Monitoring stack backup completed successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"Monitoring stack backup failed: {e}")
+            return False
+
+        finally:
+            # Always restart services
+            logger.info("Restarting monitoring services...")
+            for svc in reversed(stopped_services):
+                start_systemd_service(svc)
+
     def get_backup_status(self) -> Dict[str, any]:
         """
         Get status of all backups
@@ -570,7 +758,7 @@ class BackupManager:
         """
         status = {}
 
-        for service in ['nginx', 'mailcow', 'mailcow-directory', 'server-manager']:
+        for service in self.BACKUP_SERVICES:
             repo = self._get_borg_repo(service)
             backups = self.list_backups(repo)
 

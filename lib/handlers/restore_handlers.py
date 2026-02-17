@@ -251,6 +251,81 @@ class RestoreHandlers:
             logger.error(f"Mailcow directory restore error: {e}")
             self.ui.show_error(f"Restore failed:\n\n{e}")
 
+    def handle_restore_monitoring_stack(self):
+        """Restore monitoring stack from backup"""
+        try:
+            restore_mgr = self._get_restore_manager()
+
+            # List available backups
+            self.ui.show_infobox("Retrieving backup list from remote Borg archive...\n\nPlease wait...")
+            backups = restore_mgr.list_remote_backups('monitoring-stack')
+
+            if not backups:
+                self.ui.show_error(
+                    "No monitoring stack backups found on remote server.\n\n"
+                    "Create a backup first:\n"
+                    "  Backup Management → Backup Monitoring Stack"
+                )
+                return
+
+            # Build selection list
+            backup_items = [("latest", "Latest backup (recommended)")]
+            for backup in backups[:10]:  # Show last 10
+                backup_items.append((backup['name'], backup['name']))
+
+            # Show selection dialog
+            selected_backup = self.ui.select_from_list(
+                backup_items,
+                "Select monitoring stack backup to restore (remote Borg archive):",
+                "Restore Monitoring Stack"
+            )
+
+            if not selected_backup:
+                return
+
+            # Confirm restore
+            if not self.ui.confirm_action(
+                f"This will restore the monitoring stack from remote Borg archive:\n\n"
+                f"  {selected_backup}\n\n"
+                "Source: Remote rsync server (Borg repository)\n\n"
+                "This restores:\n"
+                "  • Grafana dashboards, config, and plugins\n"
+                "  • InfluxDB time-series data and config\n"
+                "  • pressuresuite-influx-bridge code and credentials\n\n"
+                "WARNING:\n"
+                "  • Grafana and InfluxDB will be stopped during restore\n"
+                "  • Existing data will be backed up locally (pre-restore)\n"
+                "  • This may take 5-10 minutes\n\n"
+                "Continue?",
+                "Restore Monitoring Stack"
+            ):
+                return
+
+            self.ui.show_infobox(
+                "Downloading and restoring monitoring stack from remote Borg archive...\n\n"
+                "This may take 5-10 minutes.\n"
+                "Please be patient..."
+            )
+
+            success = restore_mgr.restore_monitoring_stack(selected_backup)
+
+            if success:
+                self.ui.show_success(
+                    "Monitoring stack restored successfully!\n\n"
+                    "Services have been started and verified.\n\n"
+                    "VERIFY:\n"
+                    "  • Grafana dashboards are accessible\n"
+                    "  • InfluxDB data is intact\n"
+                    "  • pressuresuite bridge timer is running"
+                )
+                logger.info(f"Monitoring stack restore completed via TUI from {selected_backup}")
+            else:
+                self.ui.show_error("Monitoring stack restore failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Monitoring stack restore error: {e}")
+            self.ui.show_error(f"Restore failed:\n\n{e}")
+
     def handle_list_backups(self):
         """List available backups"""
         try:
@@ -263,7 +338,7 @@ class RestoreHandlers:
             backup_text += "=" * 95 + "\n"
             backup_text += "Storage: Remote rsync server via Borg repositories\n\n"
 
-            for service in ['nginx', 'mailcow', 'mailcow-directory', 'server-manager']:
+            for service in ['nginx', 'mailcow', 'mailcow-directory', 'server-manager', 'monitoring-stack']:
                 backups = restore_mgr.list_remote_backups(service)
 
                 backup_text += f"{service.upper()}:\n"

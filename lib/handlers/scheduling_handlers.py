@@ -76,112 +76,85 @@ class SchedulingHandlers:
             self.ui.show_error(f"Failed to view schedules:\n\n{e}")
 
     def handle_schedule_backup(self):
-        """Schedule automated backup"""
+        """Schedule automated backup using queue-based window selection"""
         try:
             sched_mgr = self._get_scheduling_manager()
+            from ..scheduling import SchedulingManager
 
-            # Select service
-            services = [
-                ("nginx", "nginx Proxy Manager"),
-                ("mailcow", "Mailcow Data Backup"),
-                ("mailcow-directory", "Mailcow Directory (Config & Certificates)"),
-                ("application", "Server Manager Application")
-            ]
-
-            code, service = self.ui.d.menu(
-                "Select service to schedule backup:",
-                title="Schedule Backup",
-                choices=services,
-                width=80,
-                height=16
+            # Step 1: Show queue explanation
+            intro_text = (
+                "Backup Queue Scheduling\n"
+                "==================================================\n\n"
+                "All backups are scheduled as a sequential queue,\n"
+                "ordered fastest-first to avoid I/O and CPU collisions.\n\n"
+                "Queue order:\n"
+                "  1. nginx              (daily,  +0 min)\n"
+                "  2. mailcow-directory  (daily,  +30 min)\n"
+                "  3. mailcow            (daily,  +60 min)\n"
+                "  4. server-manager     (weekly, +180 min)\n"
+                "  5. monitoring-stack   (weekly, +210 min)\n\n"
+                "Pick a start time window and all jobs will be\n"
+                "spaced automatically from that time."
             )
 
-            if code != self.ui.d.OK:
-                return
-
-            # Select schedule preset
-            presets = sched_mgr.get_schedule_presets()
-            preset_choices = [
-                ("daily_2am", "Daily at 2:00 AM (recommended)"),
-                ("daily_3am", "Daily at 3:00 AM"),
-                ("daily_4am", "Daily at 4:00 AM"),
-                ("daily_midnight", "Daily at midnight"),
-                ("weekly_sunday_2am", "Weekly on Sunday at 2:00 AM"),
-                ("every_12_hours", "Every 12 hours"),
-                ("custom", "Custom schedule (advanced)")
-            ]
-
-            code, preset = self.ui.d.menu(
-                f"Select schedule for {service} backup:\n\n"
-                "Recommended: Daily at 2:00 AM (off-peak hours)",
-                title="Backup Schedule",
-                choices=preset_choices,
+            code = self.ui.d.msgbox(
+                intro_text,
+                title="Schedule Backup Queue",
                 width=60,
-                height=18
+                height=22
             )
 
             if code != self.ui.d.OK:
                 return
 
-            if preset == "custom":
-                code, custom_schedule = self.ui.d.inputbox(
-                    "Enter custom cron schedule:\n\n"
-                    "Format: minute hour day month weekday\n"
-                    "Example: 0 2 * * * (daily at 2:00 AM)\n\n"
-                    "Cron format guide:\n"
-                    "  * * * * * = every minute\n"
-                    "  0 2 * * * = daily at 2:00 AM\n"
-                    "  0 */6 * * * = every 6 hours\n"
-                    "  0 2 * * 0 = weekly on Sunday at 2:00 AM",
-                    title="Custom Schedule",
-                    width=70,
-                    height=18
-                )
+            # Step 2: Radiolist — pick a time window
+            current_window = sched_mgr.config.get('backup.window', 'night')
+            window_choices = [
+                (key, info['label'], key == current_window)
+                for key, info in SchedulingManager.BACKUP_WINDOWS.items()
+            ]
 
-                if code != self.ui.d.OK:
-                    return
+            code, selected_window = self.ui.d.radiolist(
+                "Select a backup start time window:",
+                title="Backup Window",
+                choices=window_choices,
+                width=60,
+                height=14
+            )
 
-                schedule_expr = custom_schedule.strip()
-            else:
-                schedule_expr = presets[preset]
+            if code != self.ui.d.OK:
+                return
 
-            # Select options
+            # Step 3: Show preview of the generated schedule
+            preview = sched_mgr.get_backup_queue_description(selected_window)
+
             code = self.ui.d.yesno(
-                f"Schedule {service} backup:\n\n"
-                f"Schedule: {sched_mgr.get_schedule_description(schedule_expr)}\n"
-                f"Expression: {schedule_expr}\n\n"
-                "Options:\n"
-                "  • Verify backup integrity: Yes\n"
-                "  • Notifications: As configured\n\n"
-                "This will replace any existing schedule for this service.\n\n"
-                "Continue?",
-                title="Confirm Schedule",
+                preview + "\n\n"
+                "This will replace all existing backup schedules.\n\n"
+                "Apply this schedule?",
+                title="Confirm Backup Schedule",
                 width=60,
-                height=18
+                height=22
             )
 
             if code != self.ui.d.OK:
                 return
 
-            self.ui.show_infobox("Scheduling backup...\n\nPlease wait...")
+            # Step 4: Apply the schedule
+            self.ui.show_infobox("Scheduling backup queue...\n\nPlease wait...")
 
-            success = sched_mgr.schedule_backup(
-                service,
-                schedule_expr,
-                options={'verify': True, 'remote': True}
-            )
+            success = sched_mgr.schedule_backup_queue(selected_window)
 
             if success:
                 self.ui.show_success(
-                    f"{service.capitalize()} backup scheduled successfully!\n\n"
-                    f"Schedule: {sched_mgr.get_schedule_description(schedule_expr)}\n"
-                    f"Expression: {schedule_expr}\n\n"
-                    "Backups will run automatically at the scheduled time.\n"
-                    "Logs: /opt/server-manager/logs/backup-{service}-cron.log"
+                    "Backup queue scheduled successfully!\n\n"
+                    f"{preview}\n\n"
+                    "Backups will run automatically at the scheduled times.\n"
+                    "Logs: /opt/server-manager/logs/backup-<service>-cron.log"
                 )
-                logger.info(f"Scheduled {service} backup: {schedule_expr}")
+                logger.info(f"Backup queue scheduled: window={selected_window}")
             else:
-                self.ui.show_error("Failed to schedule backup. Check logs for details.")
+                self.ui.show_error("Failed to schedule backup queue. Check logs for details.")
 
         except Exception as e:
             logger.error(f"Schedule backup error: {e}")

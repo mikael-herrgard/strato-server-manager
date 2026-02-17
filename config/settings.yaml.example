@@ -12,6 +12,7 @@ rsync:
 borg:
   remote_path: borg14              # Borg binary name on remote server
   compression: zstd,3              # Compression algorithm and level
+  encryption: repokey              # Encryption mode for new repos (repokey, repokey-blake2, none)
   retention:
     daily: 7                       # Keep 7 daily backups
     weekly: 4                      # Keep 4 weekly backups
@@ -32,6 +33,16 @@ nginx:
   install_path: /root/nginx        # Installation directory
   domain: nginx.villaherrgard.com  # Admin interface domain
 
+# Monitoring stack configuration (Grafana/InfluxDB/pressuresuite bridge)
+monitoring-stack:
+  grafana_data_path: /var/lib/grafana          # Grafana dashboards, SQLite DB, plugins
+  grafana_config_path: /etc/grafana            # grafana.ini, provisioning
+  influxdb_data_path: /var/lib/influxdb        # Time-series data, bolt DB
+  influxdb_config_path: /etc/influxdb          # config.toml
+  bridge_install_path: /root/python/pressuresuite-influx-bridge  # App code, .env, devices.yaml
+  bridge_service: pressuresuite-influx-bridge.service
+  bridge_timer: pressuresuite-influx-bridge.timer
+
 # System configuration
 system:
   ipv6_enabled: false              # IPv6 state (managed by this application)
@@ -41,8 +52,4 @@ system:
 # Backup configuration
 backup:
   local_staging: /var/backups/local    # Local staging area for backups
-  schedule:
-    nginx: "0 2 * * *"                     # Cron schedule for nginx backups (2 AM daily)
-    mailcow-directory: "30 2 * * *"        # Cron schedule for mailcow directory backups (2:30 AM daily)
-    mailcow: "0 3 * * *"                   # Cron schedule for mailcow data backups (3 AM daily)
-    server-manager: "0 4 * * 0"             # Cron schedule for server-manager config backup (4 AM Sunday)
+  window: night                        # Backup window: night, morning, afternoon, evening
