@@ -41,7 +41,10 @@ log() {
 log "Starting automated backup: $SERVICE"
 
 # Run the backup via CLI entry point
-if "$VENV_PYTHON" "$CLI" backup "$SERVICE" $VERIFY_FLAG; then
+BACKUP_CMD=("$VENV_PYTHON" "$CLI" backup "$SERVICE")
+[ -n "$VERIFY_FLAG" ] && BACKUP_CMD+=("$VERIFY_FLAG")
+
+if "${BACKUP_CMD[@]}"; then
     log "Backup completed successfully: $SERVICE"
     exit 0
 else
