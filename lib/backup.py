@@ -746,8 +746,13 @@ class BackupManager:
         finally:
             # Always restart services
             logger.info("Restarting monitoring services...")
+            restart_failures = []
             for svc in reversed(stopped_services):
-                start_systemd_service(svc)
+                if not start_systemd_service(svc):
+                    restart_failures.append(svc)
+            if restart_failures:
+                logger.error(f"CRITICAL: Failed to restart services: {', '.join(restart_failures)}")
+                logger.error("Manual intervention required — run: systemctl start " + " ".join(restart_failures))
 
     def get_backup_status(self) -> Dict[str, any]:
         """
