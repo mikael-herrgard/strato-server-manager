@@ -219,7 +219,7 @@ download_application() {
         if [ "$SKIP_CONFIRM" = "false" ]; then
             if prompt_yes_no "Remove existing installation and continue?" "n"; then
                 log "Removing existing installation..."
-                rm -rf "$INSTALL_DIR"
+                cd / && rm -rf "$INSTALL_DIR"
                 success "Existing installation removed"
             else
                 error "Installation cancelled by user"
@@ -227,12 +227,12 @@ download_application() {
             fi
         else
             log "Removing existing installation (SKIP_CONFIRM=true)..."
-            rm -rf "$INSTALL_DIR"
+            cd / && rm -rf "$INSTALL_DIR"
         fi
     fi
 
     log "Cloning repository from: $GITHUB_REPO (branch: $GITHUB_BRANCH)"
-    git clone --branch "$GITHUB_BRANCH" --depth 1 "$GITHUB_REPO" "$INSTALL_DIR" >> "$LOG_FILE" 2>&1
+    cd / && git clone --branch "$GITHUB_BRANCH" --depth 1 "$GITHUB_REPO" "$INSTALL_DIR" >> "$LOG_FILE" 2>&1
 
     if [ ! -d "$INSTALL_DIR" ] || [ ! -f "$INSTALL_DIR/server_manager.py" ]; then
         error "Failed to clone repository or main file missing"
