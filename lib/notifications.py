@@ -183,7 +183,7 @@ Error Details:
 
 ---
 This is an automated notification from server-manager
-Server Manager v1.0
+Server Manager v1.2
 """
 
         return body
@@ -235,7 +235,7 @@ Details:
 
 ---
 This is an automated notification from server-manager
-Server Manager v1.0
+Server Manager v1.2
 """
 
             return self._send_email(subject, body)
@@ -293,7 +293,7 @@ Status: {severity}
 
 ---
 This is an automated notification from server-manager
-Server Manager v1.0
+Server Manager v1.2
 """
 
             return self._send_email(subject, body)
@@ -334,7 +334,7 @@ Time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 Level: {level}
 
 This is an automated notification from server-manager
-Server Manager v1.0
+Server Manager v1.2
 """
 
             return self._send_email(full_subject, body)
@@ -425,7 +425,7 @@ Configuration:
   To: {', '.join(self.notification_config.get('to_emails', []))}
 
 ---
-Server Manager v1.0
+Server Manager v1.2
 """
 
             success = self._send_email(subject, body)
