@@ -8,12 +8,12 @@ import argparse
 import sys
 import os
 from datetime import datetime
-from pathlib import Path
 
 # Ensure the server-manager root is on the Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.backup import BackupManager
+from lib.maintenance import MaintenanceManager
 from lib.notifications import NotificationManager
 
 
@@ -69,73 +69,45 @@ def cmd_backup(args):
 
 
 def cmd_cleanup(args):
-    """Run backup cleanup with the specified retention period."""
+    """Clean up old pre-update, pre-restore, and rollback directories."""
     retention_days = args.retention_days
-    backup_dir = Path("/opt/server-manager/backups")
 
-    if not backup_dir.exists():
-        print("Backup directory does not exist")
-        return
-
+    maintenance_mgr = MaintenanceManager()
     notif_mgr = NotificationManager()
 
-    from datetime import timedelta
-    cutoff_date = datetime.now() - timedelta(days=retention_days)
-    print(f"Removing backups older than {cutoff_date.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Cleaning up backup directories older than {retention_days} days...")
 
-    removed_count = 0
-    removed_size = 0
-    errors = []
+    try:
+        stats = maintenance_mgr.cleanup_old_backups(keep_days=retention_days)
 
-    for service_dir in backup_dir.iterdir():
-        if not service_dir.is_dir():
-            continue
+        if stats['space_freed_mb'] >= 1024:
+            size_str = f"{stats['space_freed_mb'] / 1024:.2f} GB"
+        else:
+            size_str = f"{stats['space_freed_mb']:.1f} MB"
 
-        print(f"Checking service: {service_dir.name}")
+        print(f"\nCleanup completed:")
+        print(f"  Directories removed: {stats['backups_removed']}")
+        print(f"  Space freed: {size_str}")
 
-        for backup_file in service_dir.iterdir():
-            try:
-                mtime = datetime.fromtimestamp(backup_file.stat().st_mtime)
-                if mtime < cutoff_date:
-                    file_size = backup_file.stat().st_size
-                    print(f"  Removing: {backup_file.name} (age: {(datetime.now() - mtime).days} days)")
-                    backup_file.unlink()
-                    removed_count += 1
-                    removed_size += file_size
-            except Exception as e:
-                error_msg = f"Error removing {backup_file}: {e}"
-                print(f"  {error_msg}")
-                errors.append(error_msg)
+        if stats['backups_removed'] > 0:
+            notif_mgr.send_maintenance_notification(
+                "Backup Cleanup",
+                stats['success'],
+                {
+                    'directories_removed': stats['backups_removed'],
+                    'space_freed': size_str,
+                    'retention_days': retention_days,
+                }
+            )
 
-    if removed_size > 1024**3:
-        size_str = f"{removed_size / 1024**3:.2f} GB"
-    elif removed_size > 1024**2:
-        size_str = f"{removed_size / 1024**2:.2f} MB"
-    elif removed_size > 1024:
-        size_str = f"{removed_size / 1024:.2f} KB"
-    else:
-        size_str = f"{removed_size} bytes"
+        sys.exit(0 if stats['success'] else 1)
 
-    print(f"\nCleanup completed:")
-    print(f"  Files removed: {removed_count}")
-    print(f"  Space freed: {size_str}")
-
-    if errors:
-        print(f"  Errors: {len(errors)}")
-
-    if removed_count > 0 or errors:
+    except Exception as e:
+        print(f"Cleanup error: {e}")
         notif_mgr.send_maintenance_notification(
-            "Backup Cleanup",
-            len(errors) == 0,
-            {
-                'files_removed': removed_count,
-                'space_freed': size_str,
-                'retention_days': retention_days,
-                'errors': len(errors)
-            }
+            "Backup Cleanup", False, {'error': str(e)}
         )
-
-    sys.exit(0 if len(errors) == 0 else 1)
+        sys.exit(1)
 
 
 def main():
