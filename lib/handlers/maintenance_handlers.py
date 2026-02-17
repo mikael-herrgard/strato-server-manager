@@ -300,6 +300,9 @@ class MaintenanceHandlers:
             success_count = 0
             for service in services_to_cleanup:
                 repo = backup_mgr._get_borg_repo(service)
+                if not repo:
+                    logger.error(f"No Borg repo configured for {service}")
+                    continue
                 if backup_mgr.prune_old_backups(repo):
                     success_count += 1
                     logger.info(f"Pruned old backups for {service}")
