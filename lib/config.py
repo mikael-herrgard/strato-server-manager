@@ -82,6 +82,15 @@ class ConfigManager:
                 'install_path': '/root/nginx',
                 'domain': 'nginx.villaherrgard.com'
             },
+            'monitoring-stack': {
+                'grafana_data_path': '/var/lib/grafana',
+                'grafana_config_path': '/etc/grafana',
+                'influxdb_data_path': '/var/lib/influxdb',
+                'influxdb_config_path': '/etc/influxdb',
+                'bridge_install_path': '/root/python/pressuresuite-influx-bridge',
+                'bridge_service': 'pressuresuite-influx-bridge.service',
+                'bridge_timer': 'pressuresuite-influx-bridge.timer',
+            },
             'system': {
                 'ipv6_enabled': False,
                 'auto_updates': False,
