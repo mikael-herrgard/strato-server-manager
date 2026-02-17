@@ -46,25 +46,34 @@ def cmd_backup(args):
 
         if success:
             print(f"Backup completed successfully in {duration:.2f} seconds")
-            notif_mgr.send_backup_notification(
-                service, True,
-                {'duration': f"{duration:.2f} seconds", 'verified': verify}
-            )
+            try:
+                notif_mgr.send_backup_notification(
+                    service, True,
+                    {'duration': f"{duration:.2f} seconds", 'verified': verify}
+                )
+            except Exception as ne:
+                print(f"Warning: Failed to send success notification: {ne}")
         else:
             print("Backup failed")
-            notif_mgr.send_backup_notification(
-                service, False,
-                {'error': 'Backup operation returned false', 'duration': f"{duration:.2f} seconds"}
-            )
+            try:
+                notif_mgr.send_backup_notification(
+                    service, False,
+                    {'error': 'Backup operation returned false', 'duration': f"{duration:.2f} seconds"}
+                )
+            except Exception as ne:
+                print(f"Warning: Failed to send failure notification: {ne}")
             sys.exit(1)
 
     except Exception as e:
         duration = (datetime.now() - start_time).total_seconds()
         print(f"Backup error: {e}")
-        notif_mgr.send_backup_notification(
-            service, False,
-            {'error': str(e), 'duration': f"{duration:.2f} seconds"}
-        )
+        try:
+            notif_mgr.send_backup_notification(
+                service, False,
+                {'error': str(e), 'duration': f"{duration:.2f} seconds"}
+            )
+        except Exception as ne:
+            print(f"Warning: Failed to send error notification: {ne}")
         sys.exit(1)
 
 
