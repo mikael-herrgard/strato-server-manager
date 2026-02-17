@@ -359,7 +359,7 @@ class RestoreManager:
             shutil.move(extracted_nginx, nginx_path)
 
             # Set permissions
-            os.system(f"chown -R root:root {nginx_path}")
+            run_command(['chown', '-R', 'root:root', nginx_path], check=False, timeout=60)
 
             # Start service
             self._start_service(nginx_path)
@@ -625,9 +625,11 @@ class RestoreManager:
 
             # Set permissions
             logger.info("Setting permissions...")
-            os.system(f"chown -R root:root {mailcow_path}")
-            os.system(f"chmod +x {mailcow_path}/generate_config.sh 2>/dev/null || true")
-            os.system(f"chmod +x {mailcow_path}/update.sh 2>/dev/null || true")
+            run_command(['chown', '-R', 'root:root', mailcow_path], check=False, timeout=60)
+            for script in ['generate_config.sh', 'update.sh']:
+                script_path = os.path.join(mailcow_path, script)
+                if os.path.exists(script_path):
+                    os.chmod(script_path, 0o755)
 
             logger.info("Mailcow directory restore completed successfully")
             logger.info("")
@@ -753,10 +755,10 @@ class RestoreManager:
 
             # Set permissions
             logger.info("Setting permissions...")
-            os.system(f"chown -R grafana:grafana {grafana_data}")
-            os.system(f"chown -R grafana:grafana {grafana_config}")
-            os.system(f"chown -R influxdb:influxdb {influxdb_data}")
-            os.system(f"chown -R influxdb:influxdb {influxdb_config}")
+            run_command(['chown', '-R', 'grafana:grafana', grafana_data], check=False, timeout=60)
+            run_command(['chown', '-R', 'grafana:grafana', grafana_config], check=False, timeout=60)
+            run_command(['chown', '-R', 'influxdb:influxdb', influxdb_data], check=False, timeout=60)
+            run_command(['chown', '-R', 'influxdb:influxdb', influxdb_config], check=False, timeout=60)
 
             # Reload systemd in case units changed
             logger.info("Reloading systemd daemon...")
