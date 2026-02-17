@@ -210,19 +210,12 @@ class MonitoringManager:
                 try:
                     docker_data = json.loads(stdout)
 
-                    # Parse Images
                     if 'Images' in docker_data:
-                        for img in docker_data['Images']:
-                            if 'Size' not in usage['docker']:
-                                usage['docker']['images_size'] = 0
-                            # Size is usually a string like "123MB"
-                            usage['docker']['images_count'] = len(docker_data['Images'])
+                        usage['docker']['images_count'] = len(docker_data['Images'])
 
-                    # Parse Containers
                     if 'Containers' in docker_data:
                         usage['docker']['containers_count'] = len(docker_data['Containers'])
 
-                    # Parse Volumes
                     if 'Volumes' in docker_data:
                         usage['docker']['volumes_count'] = len(docker_data['Volumes'])
 
