@@ -408,7 +408,7 @@ class MaintenanceManager:
                 # Remove unused images
                 logger.info("Removing unused images...")
                 returncode, stdout, stderr = run_command(
-                    ['docker', 'image', 'prune', '-a', '-f'],
+                    ['docker', 'image', 'prune', '-f'],
                     check=True,
                     timeout=300
                 )
