@@ -234,6 +234,16 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Changed `docker image prune -a` to `docker image prune` to only remove dangling images
 - ✅ Fixed Docker install to detect Debian vs Ubuntu for correct apt repository URL
 
+**Bootstrap & DR Fixes (February 2026):**
+- ✅ Fixed bootstrap.sh Python module verification (removed deleted paramiko/docker imports)
+- ✅ Created `notifications.yaml.example` template; bootstrap now copies it during setup
+- ✅ Bootstrap now makes `cli.py` executable; committed mode change to repo
+- ✅ Bootstrap now installs logrotate config for `/opt/server-manager/logs/`
+- ✅ Updated bootstrap completion message with current features
+- ✅ Fixed CWD crash in bootstrap.sh — `cd /` before `rm -rf` and `git clone` to prevent "Unable to read current working directory" error
+- ✅ Removed abandoned placeholder features (Portainer, config editor) from docs
+- ✅ DR-tested bootstrap.sh end-to-end on production server (found and fixed CWD bug)
+
 ## Remaining Work 🚧
 
 ### 🔶 Phase 7: Disaster Recovery (PARTIAL)
