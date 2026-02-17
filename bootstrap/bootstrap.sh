@@ -268,7 +268,7 @@ setup_python_environment() {
 
     # Verify critical imports
     log "Verifying Python modules..."
-    "$VENV_DIR/bin/python3" -c "import dialog; import yaml; import paramiko; import docker" >> "$LOG_FILE" 2>&1
+    "$VENV_DIR/bin/python3" -c "import dialog; import yaml" >> "$LOG_FILE" 2>&1
     success "Python modules verified"
 }
 
@@ -277,16 +277,23 @@ setup_python_environment() {
 ################################################################################
 
 setup_configuration() {
-    step "Setting up configuration template"
+    step "Setting up configuration"
 
-    log "Copying configuration template..."
-
+    log "Copying settings template..."
     if [ -f "$CONFIG_DIR/settings.yaml.example" ]; then
         cp "$CONFIG_DIR/settings.yaml.example" "$CONFIG_DIR/settings.yaml"
-        success "Configuration template created"
+        success "Settings template created: $CONFIG_DIR/settings.yaml"
     else
-        error "Configuration template not found"
+        error "Settings template not found"
         exit 1
+    fi
+
+    log "Copying notifications template..."
+    if [ -f "$CONFIG_DIR/notifications.yaml.example" ]; then
+        cp "$CONFIG_DIR/notifications.yaml.example" "$CONFIG_DIR/notifications.yaml"
+        success "Notifications template created: $CONFIG_DIR/notifications.yaml"
+    else
+        warn "Notifications template not found (notifications can be configured later via TUI)"
     fi
 }
 
@@ -312,9 +319,10 @@ create_directory_structure() {
 setup_symlink() {
     step "Setting up symlink and permissions"
 
-    log "Making server_manager.py executable..."
+    log "Making Python entry points executable..."
     chmod +x "$INSTALL_DIR/server_manager.py"
-    success "Executable permission set"
+    chmod +x "$INSTALL_DIR/cli.py"
+    success "Executable permissions set"
 
     log "Creating symlink..."
     ln -sf "$INSTALL_DIR/server_manager.py" "$SYMLINK_PATH"
@@ -326,6 +334,29 @@ setup_symlink() {
         chmod +x "$INSTALL_DIR/scripts"/*.sh 2>/dev/null || true
         success "Scripts made executable"
     fi
+}
+
+################################################################################
+# Logrotate Configuration
+################################################################################
+
+setup_logrotate() {
+    step "Setting up logrotate"
+
+    local logrotate_config="/etc/logrotate.d/server-manager"
+
+    log "Creating logrotate configuration..."
+    cat > "$logrotate_config" <<'LOGROTATE'
+/opt/server-manager/logs/*.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+}
+LOGROTATE
+
+    success "Logrotate configured: $logrotate_config"
 }
 
 ################################################################################
@@ -404,27 +435,29 @@ show_completion_message() {
     echo ""
     echo -e "${BOLD}Next steps:${NC}"
     echo ""
-    echo "  ${YELLOW}1.${NC} Set up credentials (if not already done):"
+    echo "  ${YELLOW}1.${NC} Set up rsync.net SSH key and Borg passphrase:"
     echo "     See: $INSTALL_DIR/CREDENTIALS_SETUP.md"
     echo ""
-    echo "  ${YELLOW}2.${NC} Edit configuration file:"
+    echo "  ${YELLOW}2.${NC} Edit configuration files:"
     echo -e "     ${CYAN}nano $CONFIG_DIR/settings.yaml${NC}"
+    echo -e "     ${CYAN}nano $CONFIG_DIR/notifications.yaml${NC}"
     echo ""
     echo "  ${YELLOW}3.${NC} Run Server Manager:"
     echo -e "     ${CYAN}server-manager${NC}"
     echo ""
     echo "  ${YELLOW}4.${NC} From the TUI:"
     echo "     - Install Docker"
-    echo "     - Install nginx"
-    echo "     - Restore nginx from backup"
+    echo "     - Install nginx Proxy Manager"
     echo "     - Install Mailcow"
-    echo "     - Restore Mailcow from backup"
-
+    echo "     - Restore services from backup (nginx, Mailcow, monitoring-stack)"
+    echo "     - Schedule automated backups (Scheduling & Automation menu)"
+    echo "     - Configure email notifications (Scheduling & Automation menu)"
     echo ""
     echo -e "${BOLD}Additional information:${NC}"
     echo "  Installation directory: $INSTALL_DIR"
     echo "  Command: server-manager"
     echo "  Configuration: $CONFIG_DIR/settings.yaml"
+    echo "  Notifications: $CONFIG_DIR/notifications.yaml"
     echo "  Log file: $LOG_FILE"
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -455,6 +488,7 @@ main() {
     create_directory_structure
     setup_configuration
     setup_symlink
+    setup_logrotate
     verify_installation
 
     # Show completion message

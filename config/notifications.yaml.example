@@ -1,0 +1,17 @@
+# Server Manager - Email Notification Configuration
+# Copy this file to notifications.yaml and customize for your environment
+#
+# To use with Mailcow: create a mailbox (e.g. alerts@yourdomain.com)
+# in the Mailcow admin panel and use those credentials below.
+
+notifications:
+  enabled: false                              # Set to true to enable notifications
+  smtp_server: mail.example.com               # Your Mailcow hostname
+  smtp_port: 587                              # SMTP submission port (587 with STARTTLS)
+  smtp_use_tls: true                          # Use STARTTLS (recommended)
+  smtp_user: alerts@example.com               # SMTP login (full email address)
+  smtp_password: ''                           # SMTP password
+  from_email: alerts@example.com              # Sender address (same as smtp_user)
+  to_emails: []                               # Recipient list, e.g. [admin@example.com]
+  notify_on_success: false                    # Send email on successful backups
+  notify_on_failure: true                     # Send email on failed backups
