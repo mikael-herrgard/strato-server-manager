@@ -12,6 +12,8 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **Hardening Update (Feb 2026):** Full backup/DR stack review and remediation. Replaced fragile temp-script pattern with proper CLI entry point (`cli.py`). Added server-manager config backup, flock-based cron mutex, logrotate, borg14 upgrade. Fixed bugs, removed dead code, improved `init.sh` with IP detection and DNS checklist. Removed legacy `/root/sh-scripts/`.
 
+**Monitoring & Scheduling Update (Feb 2026):** Added monitoring-stack (Grafana/InfluxDB/pressuresuite-bridge) backup and restore with service stop/start for data consistency. Replaced per-service backup scheduling with queue-based approach (single time window, automatic spacing). Added Borg repo auto-initialization. Fixed `os.system()` command injection risk in restore.py, removed 5 unused Python dependencies, wired CLI cleanup to actual MaintenanceManager, fixed Docker install for Debian support, removed dead scheduling code, fixed aggressive `docker image prune -a`.
+
 ## Completed Phases ✅
 
 ### ✅ Phase 1: Foundation (COMPLETE)
@@ -27,10 +29,10 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Basic menu navigation
 
 **Files Created:**
-- `lib/config.py` (149 lines)
-- `lib/ui.py` (706 lines)
-- `lib/utils.py` (111 lines)
-- `server_manager.py` (492 lines)
+- `lib/config.py` (320 lines)
+- `lib/ui.py` (682 lines)
+- `lib/utils.py` (486 lines, incl. systemd helpers added Feb 2026)
+- `server_manager.py` (511 lines)
 
 ---
 
@@ -42,20 +44,25 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Full backup functionality for all services
 - ✅ Nginx backup with Borg
 - ✅ Mailcow backup (full/config/mail/db types)
+- ✅ Mailcow directory backup
+- ✅ Server-manager config backup
+- ✅ Monitoring-stack backup (Grafana/InfluxDB/bridge) with service stop/start
 - ✅ Backup verification
 - ✅ Rsync to remote server
 - ✅ Backup status viewing
-- ✅ Note: Application backup removed (code now managed via GitHub)
+- ✅ Borg repo auto-initialization (single and bulk)
 
 **Files Created:**
-- `lib/backup.py` (689 lines)
-- `lib/handlers/backup_handlers.py` (150 lines)
+- `lib/backup.py` (772 lines)
+- `lib/handlers/backup_handlers.py` (363 lines)
 
 **Key Features:**
-- Borg deduplication
+- Borg deduplication with multi-path archive support
 - Rsync to remote server
 - Verification before deletion
 - Multiple backup types for Mailcow
+- Borg repo auto-initialization on first backup or via bulk init
+- Service stop/start for monitoring-stack data consistency
 - Comprehensive error handling
 
 ---
@@ -68,14 +75,15 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Complete restore functionality
 - ✅ Nginx restore from backup
 - ✅ Mailcow restore with type selection
-- ✅ Application restore
+- ✅ Mailcow directory restore
+- ✅ Monitoring-stack restore with service stop/start and permission setting
 - ✅ Backup selection from remote
 - ✅ List available backups
 - ✅ Service verification after restore
 
 **Files Created:**
-- `lib/restore.py` (674 lines)
-- `lib/handlers/restore_handlers.py` (210 lines)
+- `lib/restore.py` (801 lines)
+- `lib/handlers/restore_handlers.py` (358 lines)
 
 **Key Features:**
 - Restore from latest or specific backup
@@ -83,6 +91,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - Automatic service restart
 - Verification after restore
 - Pre-restore safety checks
+- Safe permission restoration via run_command (no shell injection)
 
 ---
 
@@ -100,13 +109,11 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ System information display
 
 **Files Created:**
-- `lib/installation.py` (616 lines)
-- `lib/system_config.py` (376 lines)
-- `lib/handlers/installation_handlers.py` (170 lines)
-- `lib/handlers/system_handlers.py` (180 lines)
+- `lib/installation.py` (399 lines)
+- `lib/handlers/installation_handlers.py` (150 lines)
 
 **Key Features:**
-- Automated Docker installation
+- Automated Docker installation (Debian and Ubuntu)
 - Mailcow installation with domain config
 - GRUB modification for IPv6
 - UFW firewall setup
@@ -129,10 +136,10 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ System information display
 
 **Files Created:**
-- `lib/maintenance.py` (553 lines)
-- `lib/monitoring.py` (454 lines)
-- `lib/handlers/maintenance_handlers.py` (170 lines)
-- `lib/handlers/monitoring_handlers.py` (160 lines)
+- `lib/maintenance.py` (635 lines)
+- `lib/monitoring.py` (532 lines)
+- `lib/handlers/maintenance_handlers.py` (327 lines)
+- `lib/handlers/monitoring_handlers.py` (259 lines)
 
 **Key Features:**
 - Safe updates with rollback capability
@@ -157,21 +164,22 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Notification status
 
 **Files Created:**
-- `lib/scheduling.py` (527 lines)
+- `lib/scheduling.py` (513 lines, dead code removed Feb 2026)
 - `lib/notifications.py` (461 lines)
-- `lib/handlers/scheduling_handlers.py` (603 lines)
-- `cli.py` - CLI entry point for automated operations (added Feb 2026)
+- `lib/handlers/scheduling_handlers.py` (578 lines)
+- `cli.py` - CLI entry point for automated operations (added Feb 2026, cleanup wired to MaintenanceManager)
 - `scripts/automated-backup.sh` - thin wrapper calling cli.py (refactored Feb 2026)
 - `scripts/cleanup-backups.sh` - thin wrapper calling cli.py (refactored Feb 2026)
 
 **Key Features:**
-- Crontab management (no manual editing)
-- Flexible schedule presets
+- Queue-based backup scheduling — pick one time window, all 5 services spaced automatically
+- Four time windows: Night (02:00), Morning (08:00), Afternoon (14:00), Evening (20:00)
+- Jobs ordered fastest-first: nginx → mailcow-directory → mailcow → server-manager → monitoring-stack
 - Email notifications for success/failure
 - SMTP configuration via TUI
-- Automated cleanup with retention policies
+- Automated cleanup with retention policies (CLI wired to MaintenanceManager)
 - Schedule validation
-- Flock-based cron mutex to prevent overlapping runs (added Feb 2026)
+- Flock-based cron mutex to prevent overlapping runs
 
 ---
 
@@ -206,6 +214,25 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Added logrotate config for `/opt/server-manager/logs/`
 - ✅ Removed legacy `/root/sh-scripts/` directory
 - ✅ Improved `init.sh`: public IP detection, settings.yaml customization, notifications.yaml setup, expanded DR checklist with DNS update steps
+
+**Monitoring & Scheduling Redesign (February 2026):**
+- ✅ Added monitoring-stack backup (Grafana, InfluxDB, pressuresuite-influx-bridge) with service stop/start
+- ✅ Added monitoring-stack restore with permission restoration and service verification
+- ✅ Added Borg repo auto-initialization (`_ensure_borg_repo`) and bulk init TUI option
+- ✅ Replaced per-service backup scheduling with queue-based window selection (4 time windows)
+- ✅ Added multi-path support to `_create_borg_backup()` for monitoring-stack
+- ✅ Added regex-based `_identify_job_type()` to support all service names in crontab parsing
+- ✅ Added systemd service helpers (`stop/start/verify_systemd_service`) to utils.py
+- ✅ Updated all menus and CLI for monitoring-stack support (backup, restore, status, history)
+
+**Code Quality Fixes (February 2026):**
+- ✅ Replaced all `os.system()` calls in restore.py with `run_command()` (command injection fix)
+- ✅ Removed 5 unused dependencies from requirements.txt (paramiko, docker, python-crontab, cryptography, python-dateutil)
+- ✅ Wired CLI cleanup command to `MaintenanceManager.cleanup_old_backups()` (was targeting non-existent directory)
+- ✅ Fixed notification email version string from v1.0 to v1.2
+- ✅ Removed 133 lines of dead code from scheduling.py (old `schedule_backup`, `test_schedule`, `disable_all_schedules`)
+- ✅ Changed `docker image prune -a` to `docker image prune` to only remove dangling images
+- ✅ Fixed Docker install to detect Debian vs Ubuntu for correct apt repository URL
 
 ## Remaining Work 🚧
 
@@ -313,50 +340,49 @@ elsewhere or were never wired to any menu).
 
 | Metric | Value |
 |--------|-------|
-| **Total Python Lines** | ~7,500 lines |
-| **Core Modules** | 10 files |
-| **Handler Modules** | 7 files |
-| **CLI Entry Point** | 1 file (cli.py - 171 lines) |
-| **Shell Scripts** | 2 files (thin wrappers, ~80 lines total) |
+| **Total Python Lines** | ~8,300 lines (20 files) |
+| **Core Modules** | 9 files |
+| **Handler Modules** | 7 files (incl. `__init__.py`) |
+| **CLI Entry Point** | 1 file (cli.py - 145 lines) |
+| **Shell Scripts** | 5 files (~1,050 lines total incl. bootstrap) |
 | **Configuration Files** | 2 files (settings.yaml, notifications.yaml) |
-| **Documentation Files** | 9 files |
-| **Main Application** | 520 lines (reduced from 492 after cleanup - dead placeholders removed, net reduction) |
+| **Main Application** | 511 lines |
 
 ### File Breakdown
 
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| `lib/ui.py` | 706 | TUI interface |
-| `cli.py` | 171 | CLI entry point for cron |
-| `lib/backup.py` | 584 | Backup operations |
-| `lib/restore.py` | 674 | Restore operations |
-| `lib/installation.py` | 616 | Installation automation |
-| `lib/scheduling.py` | 527 | Cron management |
-| `lib/maintenance.py` | 553 | Update operations |
+| `lib/ui.py` | 682 | TUI interface |
+| `cli.py` | 145 | CLI entry point for cron |
+| `lib/backup.py` | 772 | Backup operations |
+| `lib/restore.py` | 801 | Restore operations |
+| `lib/installation.py` | 399 | Installation automation |
+| `lib/scheduling.py` | 513 | Cron management |
+| `lib/maintenance.py` | 635 | Update operations |
 | `lib/notifications.py` | 461 | Email alerts |
-| `lib/monitoring.py` | 454 | Status monitoring |
-| `lib/system_config.py` | 376 | System configuration |
-| `lib/config.py` | 315 | Config management |
-| `lib/utils.py` | 111 | Utilities |
-| **Handler Files** | ~1,200 | Menu operations |
-| **Scripts** | 80 | Shell wrappers for cron |
-| **Main App** | 520 | TUI entry point |
+| `lib/monitoring.py` | 532 | Status monitoring |
+| `lib/config.py` | 320 | Config management |
+| `lib/utils.py` | 486 | Utilities (incl. systemd helpers) |
+| **Handler Files** | ~2,055 | Menu operations (7 files) |
+| **Scripts** | ~570 | Shell scripts (3 in scripts/) |
+| **Bootstrap** | ~485 | Bootstrap/install scripts |
+| **Main App** | 511 | TUI entry point |
 
 ### Feature Completeness
 
 | Category | Features | Complete | Remaining |
 |----------|----------|----------|-----------|
-| **Backup** | 6 | 6 (100%) | 0 (server-manager config backup added) |
-| **Restore** | 4 | 4 (100%) | 0 |
+| **Backup** | 7 | 7 (100%) | 0 (nginx, mailcow, mailcow-dir, server-mgr, monitoring-stack, verification, auto-init) |
+| **Restore** | 5 | 5 (100%) | 0 (nginx, mailcow, mailcow-dir, monitoring-stack, verification) |
 | **Installation** | 5 | 4 (80%) | 1 (Portainer) |
-| **System Config** | 4 | 4 (100%) | 0 (dead placeholder removed) |
+| **System Config** | 4 | 4 (100%) | 0 |
 | **Maintenance** | 5 | 5 (100%) | 0 |
 | **Monitoring** | 5 | 5 (100%) | 0 |
-| **Scheduling** | 7 | 7 (100%) | 0 |
+| **Scheduling** | 7 | 7 (100%) | 0 (queue-based window scheduling) |
 | **Settings** | 2 | 1 (50%) | 1 (Config editing) |
 | **DR** | 6 | 3 (50%) | 3 (auto-recover, DR test, timing) |
 | **Testing** | 10 | 0 (0%) | 10 (Full phase) |
-| **TOTAL** | 54 | 39 (72%) | 15 (28%) |
+| **TOTAL** | 56 | 41 (73%) | 15 (27%) |
 
 ## Production Readiness Assessment
 
@@ -463,11 +489,11 @@ elsewhere or were never wired to any menu).
 ### What's Working ✅
 
 The Server Manager has **successfully implemented the core functionality** with:
-- ✅ Complete backup system for all services (nginx, mailcow, mailcow-directory, server-manager config)
-- ✅ Complete restore system with verification
+- ✅ Complete backup system for all services (nginx, mailcow, mailcow-directory, server-manager, monitoring-stack)
+- ✅ Complete restore system with verification (all services incl. monitoring-stack)
 - ✅ Automated installation and configuration
 - ✅ Maintenance and monitoring capabilities
-- ✅ Automated scheduling with notifications
+- ✅ Queue-based backup scheduling with notifications
 - ✅ Professional TUI interface
 - ✅ Modular, maintainable architecture
 - ✅ Proper CLI entry point for cron automation (cli.py)
