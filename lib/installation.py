@@ -147,12 +147,22 @@ class InstallationManager:
                     timeout=300
                 )
 
+                # Detect distro (debian or ubuntu)
+                distro = 'ubuntu'
+                if os.path.exists('/etc/os-release'):
+                    with open('/etc/os-release', 'r') as f:
+                        os_release = f.read().lower()
+                    if 'debian' in os_release:
+                        distro = 'debian'
+
+                logger.info(f"Detected distro: {distro}")
+
                 # Add Docker's official GPG key
                 logger.info("Adding Docker GPG key...")
                 ensure_directory('/etc/apt/keyrings')
 
                 returncode, stdout, stderr = run_command(
-                    ['curl', '-fsSL', 'https://download.docker.com/linux/ubuntu/gpg'],
+                    ['curl', '-fsSL', f'https://download.docker.com/linux/{distro}/gpg'],
                     check=True,
                     timeout=60
                 )
@@ -174,7 +184,7 @@ class InstallationManager:
                 logger.info("Adding Docker repository...")
                 repo_line = (
                     f'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] '
-                    f'https://download.docker.com/linux/ubuntu {codename} stable'
+                    f'https://download.docker.com/linux/{distro} {codename} stable'
                 )
 
                 with open('/etc/apt/sources.list.d/docker.list', 'w') as f:
