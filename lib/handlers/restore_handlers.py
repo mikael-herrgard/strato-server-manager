@@ -32,7 +32,7 @@ class RestoreHandlers:
             restore_mgr = self._get_restore_manager()
 
             # List available backups
-            self.ui.show_infobox("Retrieving backup list...\n\nPlease wait...")
+            self.ui.show_infobox("Retrieving backup list from remote Borg archive...\n\nPlease wait...")
             backups = restore_mgr.list_remote_backups('nginx')
 
             if not backups:
@@ -51,7 +51,7 @@ class RestoreHandlers:
             # Show selection dialog
             selected_backup = self.ui.select_from_list(
                 backup_items,
-                "Select nginx backup to restore:",
+                "Select nginx backup to restore (remote Borg archive):",
                 "Restore nginx"
             )
 
@@ -60,10 +60,11 @@ class RestoreHandlers:
 
             # Confirm restore
             if not self.ui.confirm_action(
-                f"This will restore nginx from backup:\n\n"
+                f"This will restore nginx from remote Borg archive:\n\n"
                 f"  {selected_backup}\n\n"
+                "Source: Remote rsync server (Borg repository)\n\n"
                 "WARNING:\n"
-                "  • Current nginx installation will be backed up\n"
+                "  • Current nginx installation will be backed up locally\n"
                 "  • Services will be stopped during restore\n"
                 "  • This may take 5-10 minutes\n\n"
                 "Continue?",
@@ -72,7 +73,7 @@ class RestoreHandlers:
                 return
 
             self.ui.show_infobox(
-                "Restoring nginx from backup...\n\n"
+                "Downloading and restoring nginx from remote Borg archive...\n\n"
                 "This may take 5-10 minutes.\n"
                 "Please be patient..."
             )
@@ -99,7 +100,7 @@ class RestoreHandlers:
             restore_mgr = self._get_restore_manager()
 
             # List available backups
-            self.ui.show_infobox("Retrieving backup list...\n\nPlease wait...")
+            self.ui.show_infobox("Retrieving backup list from remote Borg archive...\n\nPlease wait...")
             backups = restore_mgr.list_remote_backups('mailcow')
 
             if not backups:
@@ -118,7 +119,7 @@ class RestoreHandlers:
             # Show selection dialog
             selected_backup = self.ui.select_from_list(
                 backup_items,
-                "Select Mailcow backup to restore:",
+                "Select Mailcow backup to restore (remote Borg archive):",
                 "Restore Mailcow"
             )
 
@@ -127,10 +128,11 @@ class RestoreHandlers:
 
             # Confirm restore
             if not self.ui.confirm_action(
-                f"This will restore Mailcow from backup:\n\n"
+                f"This will restore Mailcow from remote Borg archive:\n\n"
                 f"  {selected_backup}\n\n"
+                "Source: Remote rsync server (Borg repository)\n\n"
                 "WARNING:\n"
-                "  • Current Mailcow installation will be backed up\n"
+                "  • Current Mailcow installation will be backed up locally\n"
                 "  • Email services will be unavailable during restore\n"
                 "  • This may take 30-60 minutes\n"
                 "  • You may need to verify DNS records after restore\n\n"
@@ -140,7 +142,7 @@ class RestoreHandlers:
                 return
 
             self.ui.show_infobox(
-                "Restoring Mailcow from backup...\n\n"
+                "Downloading and restoring Mailcow from remote Borg archive...\n\n"
                 "This may take 30-60 minutes.\n"
                 "Please be very patient..."
             )
@@ -170,7 +172,7 @@ class RestoreHandlers:
             restore_mgr = self._get_restore_manager()
 
             # List available backups
-            self.ui.show_infobox("Retrieving backup list...\n\nPlease wait...")
+            self.ui.show_infobox("Retrieving backup list from remote Borg archive...\n\nPlease wait...")
             backups = restore_mgr.list_remote_backups('mailcow-directory')
 
             if not backups:
@@ -189,7 +191,7 @@ class RestoreHandlers:
             # Show selection dialog
             selected_backup = self.ui.select_from_list(
                 backup_items,
-                "Select Mailcow directory backup to restore:",
+                "Select Mailcow directory backup to restore (remote Borg archive):",
                 "Restore Mailcow Directory"
             )
 
@@ -198,8 +200,9 @@ class RestoreHandlers:
 
             # Confirm restore
             if not self.ui.confirm_action(
-                f"This will restore Mailcow directory from backup:\n\n"
+                f"This will restore Mailcow directory from remote Borg archive:\n\n"
                 f"  {selected_backup}\n\n"
+                "Source: Remote rsync server (Borg repository)\n\n"
                 "This restores:\n"
                 "  • Configuration files (mailcow.conf)\n"
                 "  • SSL certificates\n"
@@ -207,7 +210,7 @@ class RestoreHandlers:
                 "  • Docker compose files\n\n"
                 "WARNING:\n"
                 "  • Mailcow services will be stopped\n"
-                "  • Current directory will be backed up\n"
+                "  • Current directory will be backed up locally\n"
                 "  • This may take 5-10 minutes\n"
                 "  • You'll need to pull images and restore data separately\n\n"
                 "Continue?",
@@ -216,7 +219,7 @@ class RestoreHandlers:
                 return
 
             self.ui.show_infobox(
-                "Restoring Mailcow directory from backup...\n\n"
+                "Downloading and restoring Mailcow directory from remote Borg archive...\n\n"
                 "This may take 5-10 minutes.\n"
                 "Please be patient..."
             )
@@ -253,11 +256,12 @@ class RestoreHandlers:
         try:
             restore_mgr = self._get_restore_manager()
 
-            self.ui.show_infobox("Retrieving backup lists...\n\nPlease wait...")
+            self.ui.show_infobox("Retrieving backup lists from remote Borg archive...\n\nPlease wait...")
 
             # Build backup list text
-            backup_text = "Available Backups\n"
-            backup_text += "=" * 95 + "\n\n"
+            backup_text = "Available Remote Backups (rsync/Borg)\n"
+            backup_text += "=" * 95 + "\n"
+            backup_text += "Storage: Remote rsync server via Borg repositories\n\n"
 
             for service in ['nginx', 'mailcow', 'mailcow-directory', 'server-manager']:
                 backups = restore_mgr.list_remote_backups(service)
@@ -266,13 +270,13 @@ class RestoreHandlers:
                 if backups:
                     backup_text += f"  Total: {len(backups)} backups\n"
                     backup_text += "  Recent backups:\n"
-                    for backup in backups[:5]:  # Show last 5
+                    for backup in reversed(backups[-5:]):  # Show 5 most recent, newest first
                         backup_text += f"    • {backup['name']}\n"
                 else:
                     backup_text += "  No backups found\n"
                 backup_text += "\n"
 
-            self.ui.show_scrollable_text(backup_text, "Available Backups")
+            self.ui.show_scrollable_text(backup_text, "Available Remote Backups (rsync/Borg)")
 
         except Exception as e:
             logger.error(f"Failed to list backups: {e}")

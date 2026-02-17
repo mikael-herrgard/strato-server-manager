@@ -228,8 +228,12 @@ For help, see: /opt/server-manager/README.md
             elif choice == "3":
                 self.backup_handlers.handle_backup_mailcow_directory()
             elif choice == "4":
-                self.backup_handlers.handle_view_backup_status()
+                self.backup_handlers.handle_backup_server_manager()
             elif choice == "5":
+                self.backup_handlers.handle_backup_all()
+            elif choice == "6":
+                self.backup_handlers.handle_view_backup_status()
+            elif choice == "7":
                 # Navigate to scheduling menu
                 self._scheduling_menu()
             elif choice == "0" or choice == "back":
@@ -261,8 +265,6 @@ For help, see: /opt/server-manager/README.md
             elif choice == "2":
                 self.installation_handlers.handle_install_nginx()
             elif choice == "3":
-                self._install_portainer_placeholder()
-            elif choice == "4":
                 self.installation_handlers.handle_check_prerequisites()
             elif choice == "0" or choice == "back":
                 break
@@ -299,6 +301,8 @@ For help, see: /opt/server-manager/README.md
             elif choice == "4":
                 self.monitoring_handlers.handle_container_stats()
             elif choice == "5":
+                self.monitoring_handlers.handle_system_info()
+            elif choice == "6":
                 self._view_logs()
             elif choice == "0" or choice == "back":
                 break
@@ -337,27 +341,8 @@ For help, see: /opt/server-manager/README.md
                 self._set_retention()
             elif choice == "3":
                 self._view_config()
-            elif choice == "4":
-                self._edit_config_placeholder()
             elif choice == "0" or choice == "back":
                 break
-
-    # Placeholder methods for features not yet implemented
-    def _install_portainer_placeholder(self):
-        """Install Portainer (placeholder)"""
-        self.ui.show_info(
-            "Portainer installation will be implemented in a future phase.",
-            "Coming Soon"
-        )
-
-    def _edit_config_placeholder(self):
-        """Edit configuration file (placeholder)"""
-        self.ui.show_info(
-            "Direct configuration editing will be implemented in a future phase.\n\n"
-            "For now, you can manually edit:\n"
-            "  /opt/server-manager/config/settings.yaml",
-            "Coming Soon"
-        )
 
     # Keep these simple helper methods in main file
     def _view_logs(self):

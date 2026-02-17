@@ -220,11 +220,12 @@ class MonitoringHandlers:
                 self.ui.show_error("Restore manager not available")
                 return
 
-            self.ui.show_infobox("Retrieving backup history...\n\nPlease wait...")
+            self.ui.show_infobox("Retrieving backup history from remote Borg archive...\n\nPlease wait...")
 
             # Build backup history text
-            history_text = "Backup History\n"
-            history_text += "=" * 95 + "\n\n"
+            history_text = "Backup History (Remote rsync/Borg)\n"
+            history_text += "=" * 95 + "\n"
+            history_text += "Storage: Remote rsync server via Borg repositories\n\n"
 
             for service in ['nginx', 'mailcow-directory', 'mailcow', 'server-manager']:
                 try:
@@ -250,7 +251,7 @@ class MonitoringHandlers:
                     history_text += f"{service.upper()}:\n"
                     history_text += f"  Error retrieving backups: {str(e)}\n\n"
 
-            self.ui.show_scrollable_text(history_text, "Backup History")
+            self.ui.show_scrollable_text(history_text, "Backup History (Remote rsync/Borg)")
             logger.info("Backup history displayed via TUI")
 
         except Exception as e:

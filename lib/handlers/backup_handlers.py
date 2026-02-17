@@ -146,18 +146,108 @@ class BackupHandlers:
             logger.error(f"Mailcow directory backup error: {e}")
             self.ui.show_error(f"Backup failed:\n\n{e}")
 
+    def handle_backup_server_manager(self):
+        """Backup Server-Manager configuration"""
+        if not self.ui.confirm_action(
+            "This will create a backup of Server-Manager configuration.\n\n"
+            "The backup includes:\n"
+            "  • settings.yaml\n"
+            "  • notifications.yaml\n\n"
+            "The backup will be stored on your rsync server.\n\n"
+            "Continue?",
+            "Backup Server-Manager"
+        ):
+            return
+
+        try:
+            backup_mgr = self._get_backup_manager()
+
+            self.ui.show_infobox("Creating Server-Manager config backup...\n\nThis may take a few minutes.")
+
+            success = backup_mgr.backup_server_manager(verify=True)
+
+            if success:
+                self.ui.show_success(
+                    "Server-Manager config backup completed successfully!\n\n"
+                    "The backup has been stored on your rsync server and verified."
+                )
+                logger.info("Server-Manager config backup completed via TUI")
+            else:
+                self.ui.show_error("Server-Manager config backup failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Server-Manager config backup error: {e}")
+            self.ui.show_error(f"Backup failed:\n\n{e}")
+
+    def handle_backup_all(self):
+        """Backup all services in sequence"""
+        if not self.ui.confirm_action(
+            "This will backup ALL services in sequence:\n\n"
+            "  1. nginx Proxy Manager\n"
+            "  2. Mailcow Directory\n"
+            "  3. Mailcow Data (complete)\n"
+            "  4. Server-Manager Config\n\n"
+            "This may take 30-90 minutes depending on data volume.\n\n"
+            "Continue?",
+            "Backup All Services"
+        ):
+            return
+
+        try:
+            backup_mgr = self._get_backup_manager()
+
+            results = {}
+
+            # 1. nginx
+            self.ui.show_infobox("Backing up nginx Proxy Manager...\n\n(Step 1 of 4)")
+            results['nginx'] = backup_mgr.backup_nginx(verify=True)
+
+            # 2. Mailcow Directory
+            self.ui.show_infobox("Backing up Mailcow Directory...\n\n(Step 2 of 4)")
+            results['mailcow-directory'] = backup_mgr.backup_mailcow_directory(verify=True)
+
+            # 3. Mailcow Data
+            self.ui.show_infobox("Backing up Mailcow Data...\n\n(Step 3 of 4)\nThis may take a while...")
+            results['mailcow'] = backup_mgr.backup_mailcow(backup_type='all', verify=True)
+
+            # 4. Server-Manager
+            self.ui.show_infobox("Backing up Server-Manager Config...\n\n(Step 4 of 4)")
+            results['server-manager'] = backup_mgr.backup_server_manager(verify=True)
+
+            # Build summary
+            succeeded = sum(1 for v in results.values() if v)
+            total = len(results)
+
+            summary = f"Backup All Services Complete: {succeeded}/{total} succeeded\n\n"
+            for service, success in results.items():
+                icon = "OK" if success else "FAILED"
+                summary += f"  [{icon}] {service}\n"
+
+            if succeeded == total:
+                self.ui.show_success(summary)
+                logger.info("Backup all services completed successfully via TUI")
+            else:
+                summary += "\nCheck logs for details on failed backups."
+                self.ui.show_error(summary)
+                logger.warning(f"Backup all services: {succeeded}/{total} succeeded")
+
+        except Exception as e:
+            logger.error(f"Backup all services error: {e}")
+            self.ui.show_error(f"Backup failed:\n\n{e}")
+
     def handle_view_backup_status(self):
         """View backup status"""
         try:
             backup_mgr = self._get_backup_manager()
 
-            self.ui.show_infobox("Retrieving backup status...\n\nPlease wait...")
+            self.ui.show_infobox("Retrieving backup status from remote Borg archive...\n\nPlease wait...")
 
             status = backup_mgr.get_backup_status()
 
             # Build status text
-            status_text = "Backup Status\n"
-            status_text += "=" * 95 + "\n\n"
+            status_text = "Backup Status (Remote rsync/Borg)\n"
+            status_text += "=" * 95 + "\n"
+            status_text += "Storage: Remote rsync server via Borg repositories\n\n"
 
             for service, info in status.items():
                 status_text += f"{service.upper()}:\n"
@@ -169,7 +259,7 @@ class BackupHandlers:
                     status_text += "  Latest Backup: None\n"
                 status_text += "\n"
 
-            self.ui.show_scrollable_text(status_text, "Backup Status")
+            self.ui.show_scrollable_text(status_text, "Backup Status (Remote rsync/Borg)")
 
         except Exception as e:
             logger.error(f"Failed to get backup status: {e}")

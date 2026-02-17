@@ -38,9 +38,9 @@ class MaintenanceHandlers:
         """Update nginx"""
         if not self.ui.confirm_action(
             "This will update nginx Proxy Manager to the latest version.\n\n"
-            "A backup will be created automatically before the update.\n\n"
+            "A local directory backup will be created before the update.\n\n"
             "The update process:\n"
-            "  1. Create pre-update backup\n"
+            "  1. Create local pre-update backup\n"
             "  2. Pull latest image\n"
             "  3. Restart containers\n"
             "  4. Verify service is running\n\n"
@@ -59,7 +59,7 @@ class MaintenanceHandlers:
             if success:
                 self.ui.show_success(
                     "nginx Proxy Manager updated successfully!\n\n"
-                    "A pre-update backup was created.\n"
+                    "A local pre-update backup was created on disk.\n"
                     "Service is running with the latest version."
                 )
                 logger.info("nginx update completed via TUI")
@@ -86,12 +86,13 @@ class MaintenanceHandlers:
         """Update Mailcow"""
         if not self.ui.confirm_action(
             "This will update Mailcow using the official update script.\n\n"
+            "A local directory backup will be created on disk before the update.\n\n"
             "WARNING: This may take 10-20 minutes!\n\n"
-            "The update script will:\n"
-            "  • Update Docker images\n"
-            "  • Update Mailcow configuration\n"
-            "  • Restart services\n"
-            "  • Run database migrations\n\n"
+            "The update process:\n"
+            "  1. Create local pre-update backup\n"
+            "  2. Run official update script\n"
+            "  3. Restart services\n"
+            "  4. Run database migrations\n\n"
             "Mailcow will be temporarily unavailable during the update.\n\n"
             "Continue?",
             "Update Mailcow"
@@ -107,22 +108,36 @@ class MaintenanceHandlers:
                 "Please be patient..."
             )
 
-            success = maint_mgr.update_mailcow()
+            success = maint_mgr.update_mailcow(backup_first=True)
 
             if success:
                 self.ui.show_success(
                     "Mailcow updated successfully!\n\n"
+                    "A local pre-update backup was created on disk.\n"
                     "All services have been restarted.\n"
                     "Check logs for detailed update information."
                 )
                 logger.info("Mailcow update completed via TUI")
             else:
-                self.ui.show_error(
+                if self.ui.confirm_action(
                     "Mailcow update failed!\n\n"
-                    "Check logs for details.\n\n"
-                    "The system may be in an inconsistent state.\n"
-                    "You may need to restore from backup."
-                )
+                    "Do you want to rollback to the previous version?\n\n"
+                    "Note: This rolls back config/compose files only.\n"
+                    "Database migrations are not reversed.\n"
+                    "For full data rollback, use Restore Management.",
+                    "Update Failed"
+                ):
+                    self.ui.show_infobox("Rolling back Mailcow...\n\nPlease wait...")
+                    backup_path = maint_mgr.rollback_mailcow()
+                    if backup_path:
+                        self.ui.show_success(f"Rollback successful!\n\nRestored from: {backup_path}")
+                    else:
+                        self.ui.show_error("Rollback failed. Check logs for details.")
+                else:
+                    self.ui.show_error(
+                        "Update failed. Check logs for details.\n\n"
+                        "You may need to restore from backup."
+                    )
 
         except Exception as e:
             logger.error(f"Mailcow update error: {e}")
@@ -260,18 +275,19 @@ class MaintenanceHandlers:
 
             # Confirm action
             if not self.ui.confirm_action(
-                f"This will prune old backups for {selected} using retention policy:\n\n"
+                f"This will prune old remote Borg archives for {selected} using retention policy:\n\n"
                 f"  • Daily: Keep last {retention['daily']} backups\n"
                 f"  • Weekly: Keep last {retention['weekly']} backups\n"
                 f"  • Monthly: Keep last {retention['monthly']} backups\n\n"
-                "Backups older than these retention periods will be permanently deleted.\n\n"
+                "Archives on the remote rsync server older than these retention\n"
+                "periods will be permanently deleted.\n\n"
                 "Continue?",
                 "Cleanup Old Backups"
             ):
                 return
 
             # Show progress
-            self.ui.show_infobox("Cleaning up old backups...\n\nPlease wait...")
+            self.ui.show_infobox("Pruning old remote Borg archives...\n\nPlease wait...")
 
             # Determine which services to cleanup
             services_to_cleanup = []
@@ -293,9 +309,9 @@ class MaintenanceHandlers:
             # Show result
             if success_count == len(services_to_cleanup):
                 self.ui.show_success(
-                    f"Backup cleanup completed successfully!\n\n"
-                    f"Cleaned up {len(services_to_cleanup)} service(s).\n\n"
-                    "Old backups have been pruned based on retention policy.\n"
+                    f"Remote backup cleanup completed successfully!\n\n"
+                    f"Cleaned up {len(services_to_cleanup)} service(s) on remote rsync server.\n\n"
+                    "Old Borg archives have been pruned based on retention policy.\n"
                     "Check logs for details about freed space."
                 )
                 logger.info(f"Backup cleanup completed via TUI for {services_to_cleanup}")

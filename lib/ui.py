@@ -77,8 +77,10 @@ class ServerManagerUI:
             ("1", "Backup nginx Proxy Manager"),
             ("2", "Backup Mailcow Data"),
             ("3", "Backup Mailcow Directory"),
-            ("4", "View Backup Status"),
-            ("5", "Configure Backup Schedule"),
+            ("4", "Backup Server-Manager Config"),
+            ("5", "Backup All Services"),
+            ("6", "View Backup Status"),
+            ("7", "Configure Backup Schedule"),
             ("0", "Back to Main Menu")
         ]
 
@@ -135,8 +137,7 @@ class ServerManagerUI:
         menu_items = [
             ("1", "Install Docker"),
             ("2", "Install nginx Proxy Manager"),
-            ("3", "Install Portainer"),
-            ("4", "Check Prerequisites"),
+            ("3", "Check Prerequisites"),
             ("0", "Back to Main Menu")
         ]
 
@@ -196,7 +197,8 @@ class ServerManagerUI:
             ("2", "Disk Usage"),
             ("3", "Backup History"),
             ("4", "Container Stats"),
-            ("5", "View Logs"),
+            ("5", "System Information"),
+            ("6", "View Logs"),
             ("0", "Back to Main Menu")
         ]
 
@@ -225,7 +227,6 @@ class ServerManagerUI:
             ("1", "Notification Settings"),
             ("2", "Set Backup Retention"),
             ("3", "View Configuration"),
-            ("4", "Edit Configuration File"),
             ("0", "Back to Main Menu")
         ]
 

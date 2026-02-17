@@ -172,9 +172,12 @@ class MaintenanceManager:
             logger.error(f"Rollback failed: {e}")
             return None
 
-    def update_mailcow(self) -> bool:
+    def update_mailcow(self, backup_first: bool = True) -> bool:
         """
         Update Mailcow using official update script
+
+        Args:
+            backup_first: Create local directory backup before update
 
         Returns:
             True if successful
@@ -194,6 +197,15 @@ class MaintenanceManager:
 
         try:
             with CommandExecutor("Updating Mailcow"):
+                # Create backup if requested
+                if backup_first:
+                    logger.info("Creating pre-update backup...")
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    backup_path = f"{mailcow_path}.pre-update.{timestamp}"
+
+                    shutil.copytree(mailcow_path, backup_path, symlinks=True)
+                    logger.info(f"Backup created at: {backup_path}")
+
                 # Mailcow's official update script handles everything
                 logger.info("Running Mailcow update script...")
                 logger.info("This may take 10-20 minutes...")
@@ -219,6 +231,75 @@ class MaintenanceManager:
         except Exception as e:
             logger.error(f"Unexpected error during Mailcow update: {e}")
             return False
+
+    def rollback_mailcow(self) -> Optional[str]:
+        """
+        Rollback Mailcow to previous pre-update backup
+
+        This rolls back config/compose files only. Database migrations
+        from update.sh are not reversed. For full data rollback, use
+        Restore Management.
+
+        Returns:
+            Backup path used for rollback, or None if failed
+        """
+        logger.info("Starting Mailcow rollback")
+
+        mailcow_path = self.mailcow_config['install_path']
+        parent_dir = os.path.dirname(mailcow_path)
+
+        # Find most recent backup
+        backups = []
+        for item in os.listdir(parent_dir):
+            if item.startswith(os.path.basename(mailcow_path) + '.pre-update.'):
+                backup_path = os.path.join(parent_dir, item)
+                if os.path.isdir(backup_path):
+                    backups.append(backup_path)
+
+        if not backups:
+            logger.error("No Mailcow backups found for rollback")
+            return None
+
+        # Get most recent backup
+        latest_backup = max(backups, key=os.path.getmtime)
+        logger.info(f"Rolling back to: {latest_backup}")
+
+        try:
+            with CommandExecutor("Rolling back Mailcow"):
+                # Stop current containers
+                logger.info("Stopping current Mailcow containers...")
+                run_command(
+                    ['docker', 'compose', 'down'],
+                    check=False,
+                    cwd=mailcow_path,
+                    timeout=120
+                )
+
+                # Move current installation to .rollback
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                rollback_save = f"{mailcow_path}.rollback.{timestamp}"
+                shutil.move(mailcow_path, rollback_save)
+                logger.info(f"Current installation saved to: {rollback_save}")
+
+                # Restore from backup
+                shutil.copytree(latest_backup, mailcow_path, symlinks=True)
+                logger.info(f"Restored from backup: {latest_backup}")
+
+                # Start containers
+                logger.info("Starting Mailcow containers...")
+                returncode, stdout, stderr = run_command(
+                    ['docker', 'compose', 'up', '-d'],
+                    check=True,
+                    cwd=mailcow_path,
+                    timeout=300
+                )
+
+                logger.info("Mailcow rollback completed successfully")
+                return latest_backup
+
+        except Exception as e:
+            logger.error(f"Rollback failed: {e}")
+            return None
 
     def update_system_packages(self, security_only: bool = False) -> bool:
         """
