@@ -197,6 +197,21 @@ class MonitoringHandlers:
             logger.error(f"Disk usage error: {e}")
             self.ui.show_error(f"Failed to get disk usage:\n\n{e}")
 
+    def _parse_archive_date(self, archive_name: str) -> str:
+        """Extract a readable date from an archive name like ubuntu-nginx-2026-02-17_02-00-02"""
+        try:
+            # Find the date portion: YYYY-MM-DD_HH-MM-SS at the end
+            parts = archive_name.rsplit('-', 5)  # split from right to get date components
+            if len(parts) >= 6:
+                # Reconstruct: YYYY-MM-DD HH:MM
+                date_str = f"{parts[-5]}-{parts[-4]}-{parts[-3].split('_')[0]}"
+                time_part = parts[-3].split('_')[1] if '_' in parts[-3] else "00"
+                date_str += f" {time_part}:{parts[-2]}"
+                return date_str
+        except (IndexError, ValueError):
+            pass
+        return ""
+
     def handle_backup_history(self):
         """Display backup history for all services"""
         try:
@@ -211,7 +226,7 @@ class MonitoringHandlers:
             history_text = "Backup History\n"
             history_text += "=" * 95 + "\n\n"
 
-            for service in ['nginx', 'mailcow']:
+            for service in ['nginx', 'mailcow-directory', 'mailcow', 'server-manager']:
                 try:
                     backups = restore_mgr.list_remote_backups(service)
 
@@ -219,9 +234,13 @@ class MonitoringHandlers:
                     if backups:
                         history_text += f"  Total: {len(backups)} backups\n\n"
                         history_text += "  Recent backups:\n"
-                        # Show last 10 backups (already sorted newest first by Borg)
-                        for backup in backups[:10]:
-                            history_text += f"    • {backup['name']}\n"
+                        # Borg lists oldest first, reverse to show newest first
+                        for backup in reversed(backups[-10:]):
+                            date_str = self._parse_archive_date(backup['name'])
+                            if date_str:
+                                history_text += f"    • {date_str}  {backup['name']}\n"
+                            else:
+                                history_text += f"    • {backup['name']}\n"
                     else:
                         history_text += "  No backups found\n"
                     history_text += "\n"
