@@ -7,7 +7,7 @@ Unified TUI application for managing VPS server installations, backups, and disa
 Server Manager provides a unified interface (similar to raspi-config) for managing:
 - **Backup Management**: Automated backups of nginx, Mailcow, and application files to remote rsync server
 - **Restore Management**: Quick restoration from backups for disaster recovery
-- **Installation**: Automated installation of Docker, Mailcow, nginx Proxy Manager, and Portainer
+- **Installation**: Automated installation of Docker, Mailcow, and nginx Proxy Manager
 - **System Configuration**: IPv6 management, firewall, network settings
 - **Maintenance**: Updates and cleanup operations
 - **Monitoring**: Service status, disk usage, backup history

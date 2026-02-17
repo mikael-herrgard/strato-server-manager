@@ -312,28 +312,6 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 ---
 
-### ❓ Placeholder Features (Lower Priority)
-
-Two menu items still show "Coming Soon" placeholders. Six dead placeholder methods
-were removed in the Feb 2026 cleanup (they referenced features already implemented
-elsewhere or were never wired to any menu).
-
-**1. Install Portainer (Optional)**
-- **Current Status:** Placeholder showing "Coming Soon" in Installation menu
-- **Effort:** 2-3 hours
-- **Priority:** LOW (not critical for core functionality)
-- **Implementation:** Similar to nginx/mailcow installation
-
-**2. Edit Configuration File (Optional)**
-- **Current Status:** Placeholder showing "Coming Soon" in Settings menu
-- **Effort:** 3-4 hours
-- **Priority:** LOW (manual YAML editing works fine)
-- **Implementation:** Launch system editor or built-in editor
-
-**Total Estimated Effort for Placeholders:** 5-7 hours
-
----
-
 ## Project Statistics
 
 ### Code Metrics
@@ -374,15 +352,15 @@ elsewhere or were never wired to any menu).
 |----------|----------|----------|-----------|
 | **Backup** | 7 | 7 (100%) | 0 (nginx, mailcow, mailcow-dir, server-mgr, monitoring-stack, verification, auto-init) |
 | **Restore** | 5 | 5 (100%) | 0 (nginx, mailcow, mailcow-dir, monitoring-stack, verification) |
-| **Installation** | 5 | 4 (80%) | 1 (Portainer) |
+| **Installation** | 4 | 4 (100%) | 0 |
 | **System Config** | 4 | 4 (100%) | 0 |
 | **Maintenance** | 5 | 5 (100%) | 0 |
 | **Monitoring** | 5 | 5 (100%) | 0 |
 | **Scheduling** | 7 | 7 (100%) | 0 (queue-based window scheduling) |
-| **Settings** | 2 | 1 (50%) | 1 (Config editing) |
+| **Settings** | 1 | 1 (100%) | 0 |
 | **DR** | 6 | 3 (50%) | 3 (auto-recover, DR test, timing) |
 | **Testing** | 10 | 0 (0%) | 10 (Full phase) |
-| **TOTAL** | 56 | 41 (73%) | 15 (27%) |
+| **TOTAL** | 52 | 41 (79%) | 11 (21%) |
 
 ## Production Readiness Assessment
 
@@ -392,19 +370,12 @@ elsewhere or were never wired to any menu).
 |---------|--------|-------|
 | **Backup Management** | ✅ Production Ready | All services, verification, remote sync |
 | **Restore Management** | ✅ Production Ready | All services, selection, verification |
-| **Installation** | ✅ Production Ready | Docker, Mailcow, nginx (Portainer optional) |
+| **Installation** | ✅ Production Ready | Docker, Mailcow, nginx |
 | **System Configuration** | ✅ Production Ready | IPv6, firewall, system info |
 | **Maintenance** | ✅ Production Ready | Updates, cleanup, rollback |
 | **Monitoring** | ✅ Production Ready | Status, stats, disk usage |
 | **Scheduling** | ✅ Production Ready | Automated backups, cleanup, notifications |
 | **TUI Interface** | ✅ Production Ready | All menus work, loops properly, alt screen |
-
-### ⚠️ Optional Features (Can Be Added Later)
-
-| Feature | Priority | Impact if Missing |
-|---------|----------|-------------------|
-| Portainer Installation | LOW | Can install manually |
-| Config Editing via TUI | LOW | Can edit YAML manually |
 
 ### 🚧 Critical Gaps
 
@@ -463,11 +434,7 @@ elsewhere or were never wired to any menu).
    - Performance testing
    - Security audit
 
-2. **Implement Placeholder Features**
-   - Based on actual user needs
-   - Low priority, nice-to-have
-
-3. **Advanced Features (Phase 9+)**
+2. **Advanced Features (Phase 9+)**
    - Multi-server support
    - Web interface
    - Enhanced notifications
@@ -509,7 +476,7 @@ The main gaps are:
 - ⚠️ **Automated recovery mode** (`--auto-recover` flag, nice to have)
 - ⚠️ **Unit/integration tests** (quality assurance)
 - ⚠️ **SMTP notification credentials** (structure ready, mailcow mailbox + password needed)
-- ℹ️ Optional placeholder features (Portainer, config editor - low priority)
+- ℹ️ **SMTP notification credentials** (structure ready, mailcow mailbox + password needed)
 
 ### Recommendation 🎯
 
@@ -532,7 +499,7 @@ The application is **ready for production use** for:
 2. Complete user documentation
 3. Implement automated recovery (Phase 7)
 4. Add unit tests (Phase 8)
-5. Optional: Complete placeholder features
+5. Configure SMTP notification credentials
 
 ---
 
