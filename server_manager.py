@@ -189,7 +189,7 @@ class ServerManager:
             hostname = get_hostname()
             ip = get_ip_address()
 
-            welcome_msg = f"""Welcome to Server Manager v1.0!
+            welcome_msg = f"""Welcome to Server Manager v1.2!
 
 This is your first time running the application.
 

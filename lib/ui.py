@@ -28,7 +28,7 @@ class ServerManagerUI:
         self.title = title
         self.d = Dialog(dialog="dialog", autowidgetsize=True)
         self.d.add_persistent_args(['--keep-tite'])
-        self.d.set_background_title(f"{title} v1.0")
+        self.d.set_background_title(f"{title} v1.2")
 
         # UI dimensions
         self.height = 20

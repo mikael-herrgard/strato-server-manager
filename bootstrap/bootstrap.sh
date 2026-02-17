@@ -26,7 +26,7 @@ set -o pipefail
 # Configuration Variables
 ################################################################################
 
-VERSION="1.0.0"
+VERSION="1.2.0"
 INSTALL_DIR="/opt/server-manager"
 VENV_DIR="${INSTALL_DIR}/venv"
 CONFIG_DIR="${INSTALL_DIR}/config"
