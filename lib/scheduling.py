@@ -3,12 +3,11 @@ Scheduling Manager
 Handles automated task scheduling via cron
 """
 
-import os
 import re
 import subprocess
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from .utils import logger
 from .config import get_config
 
@@ -141,61 +140,6 @@ class SchedulingManager:
             return 'health_check'
         else:
             return 'unknown'
-
-    def schedule_backup(
-        self,
-        service: str,
-        schedule: str,
-        options: Optional[Dict] = None
-    ) -> bool:
-        """
-        Schedule automated backup
-
-        Args:
-            service: Service to backup (nginx, mailcow, mailcow-directory, application)
-            schedule: Cron schedule expression
-            options: Optional backup options
-
-        Returns:
-            True if scheduled successfully
-        """
-        try:
-            options = options or {}
-
-            # Validate schedule
-            if not self._validate_cron_schedule(schedule):
-                raise ValueError(f"Invalid cron schedule: {schedule}")
-
-            # Build backup command
-            cmd = self._build_backup_command(service, options)
-
-            # Get current crontab
-            current = self.get_current_schedule()
-
-            # Remove existing job for this service if any
-            jobs = [j for j in current.get('jobs', []) if j['type'] != f'backup_{service}']
-
-            # Add new job
-            jobs.append({
-                'minute': schedule.split()[0],
-                'hour': schedule.split()[1],
-                'day': schedule.split()[2],
-                'month': schedule.split()[3],
-                'weekday': schedule.split()[4],
-                'command': cmd,
-                'schedule': schedule,
-                'type': f'backup_{service}'
-            })
-
-            # Write new crontab
-            self._write_crontab(jobs)
-
-            logger.info(f"Scheduled {service} backup: {schedule}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to schedule backup: {e}")
-            return False
 
     def schedule_backup_queue(self, window_key: str) -> bool:
         """
@@ -528,82 +472,6 @@ class SchedulingManager:
 
         except Exception as e:
             logger.error(f"Failed to schedule cleanup: {e}")
-            return False
-
-    def test_schedule(self, service: str) -> Dict[str, any]:
-        """
-        Test scheduled job execution
-
-        Args:
-            service: Service to test backup
-
-        Returns:
-            Test results dictionary
-        """
-        try:
-            cmd = self._build_backup_command(service, {'verify': True})
-
-            # Remove log redirection for test
-            cmd = cmd.split('>>')[0].strip()
-
-            start_time = datetime.now()
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minute timeout for test
-            )
-            end_time = datetime.now()
-
-            duration = (end_time - start_time).total_seconds()
-
-            return {
-                'success': result.returncode == 0,
-                'duration': duration,
-                'output': result.stdout,
-                'error': result.stderr,
-                'returncode': result.returncode
-            }
-
-        except subprocess.TimeoutExpired:
-            return {
-                'success': False,
-                'duration': 300,
-                'output': '',
-                'error': 'Test timed out after 5 minutes',
-                'returncode': -1
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'duration': 0,
-                'output': '',
-                'error': str(e),
-                'returncode': -1
-            }
-
-    def disable_all_schedules(self) -> bool:
-        """
-        Disable all server-manager schedules
-
-        Returns:
-            True if disabled successfully
-        """
-        try:
-            # Remove crontab entirely
-            result = subprocess.run(
-                ["crontab", "-r"],
-                capture_output=True,
-                text=True
-            )
-
-            # Note: crontab -r returns 0 even if no crontab exists
-            logger.info("All schedules disabled")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to disable schedules: {e}")
             return False
 
     def get_next_run_time(self, schedule: str) -> Optional[str]:
