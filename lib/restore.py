@@ -650,6 +650,87 @@ class RestoreManager:
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
 
+    def restore_server_manager(self, backup_name: str = "latest") -> bool:
+        """
+        Restore server-manager configuration files from backup
+
+        Restores /opt/server-manager/config/ (settings.yaml, notifications.yaml)
+
+        Args:
+            backup_name: Backup name to restore ("latest" for most recent)
+
+        Returns:
+            True if successful
+        """
+        logger.info(f"Starting server-manager config restore (backup: {backup_name})")
+
+        config_path = '/opt/server-manager/config'
+        repo = self._get_borg_repo('server-manager')
+
+        # Get backup list
+        backups = self.list_remote_backups('server-manager')
+        if not backups:
+            logger.error("No server-manager backups found")
+            return False
+
+        # Select backup
+        if backup_name == "latest":
+            selected_backup = backups[-1]['name']
+            logger.info(f"Using latest backup: {selected_backup}")
+        else:
+            selected_backup = backup_name
+
+        # Check disk space
+        if not check_disk_space(self.local_staging, 1):
+            logger.error("Insufficient disk space for restore")
+            return False
+
+        # Backup existing config
+        if os.path.exists(config_path):
+            backup_path = self._backup_existing_installation(config_path, 'server-manager')
+            if backup_path:
+                logger.info(f"Existing config saved to: {backup_path}")
+
+        # Create temporary extraction directory
+        temp_dir = os.path.join(
+            self.local_staging,
+            f'restore-server-manager-{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+        )
+        ensure_directory(temp_dir)
+
+        try:
+            # Extract backup
+            if not self._extract_backup(repo, selected_backup, temp_dir):
+                return False
+
+            # Find extracted config directory
+            extracted_config = os.path.join(temp_dir, config_path.lstrip('/'))
+
+            if not os.path.exists(extracted_config):
+                logger.error(f"Config directory not found in backup: {extracted_config}")
+                return False
+
+            # Restore config files individually (don't overwrite .example files or other non-config)
+            restored = 0
+            for filename in os.listdir(extracted_config):
+                src = os.path.join(extracted_config, filename)
+                dst = os.path.join(config_path, filename)
+                if os.path.isfile(src):
+                    logger.info(f"Restoring: {filename}")
+                    shutil.copy2(src, dst)
+                    restored += 1
+
+            logger.info(f"Server-manager config restore completed — {restored} file(s) restored")
+            return True
+
+        except Exception as e:
+            logger.error(f"Server-manager config restore failed: {e}", exc_info=True)
+            return False
+        finally:
+            # Cleanup temp directory
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+
     def restore_monitoring_stack(self, backup_name: str = "latest") -> bool:
         """
         Restore monitoring stack (Grafana, InfluxDB, pressuresuite-influx-bridge) from backup

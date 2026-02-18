@@ -115,6 +115,8 @@ def cmd_restore(args):
             success = restore_mgr.restore_mailcow(backup_name=archive)
         elif service == "mailcow-directory":
             success = restore_mgr.restore_mailcow_directory(backup_name=archive)
+        elif service == "server-manager":
+            success = restore_mgr.restore_server_manager(backup_name=archive)
         elif service == "monitoring-stack":
             success = restore_mgr.restore_monitoring_stack(backup_name=archive)
         else:
@@ -199,7 +201,7 @@ def main():
     restore_parser = subparsers.add_parser("restore", help="Restore a service from backup")
     restore_parser.add_argument(
         "service",
-        choices=["nginx", "mailcow", "mailcow-directory", "monitoring-stack"],
+        choices=["nginx", "mailcow", "mailcow-directory", "server-manager", "monitoring-stack"],
         help="Service to restore"
     )
     restore_parser.add_argument(
