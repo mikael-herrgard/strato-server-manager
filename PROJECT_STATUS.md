@@ -14,7 +14,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **Monitoring & Scheduling Update (Feb 2026):** Added monitoring-stack (Grafana/InfluxDB/pressuresuite-bridge) backup and restore with service stop/start for data consistency. Replaced per-service backup scheduling with queue-based approach (single time window, automatic spacing). Added Borg repo auto-initialization. Fixed `os.system()` command injection risk in restore.py, removed 5 unused Python dependencies, wired CLI cleanup to actual MaintenanceManager, fixed Docker install for Debian support, removed dead scheduling code, fixed aggressive `docker image prune -a`.
 
-**DR Testing (Feb 2026):** Added CLI `restore` and `restore-all` subcommands. Tested backup→restore for every service on production. Found and fixed 5 bugs. Restructured `init.sh` into two-phase flow (IPv6 disable → reboot → Docker install + schedule backups). Full DR is now: `init.sh` → reboot → `cli.py restore-all`. All services verified working after restore. Full end-to-end DR test completed on fresh VPS: init.sh → reboot → phase 2 auto-run → restore-all (5/5 services OK in 5m20s). Monitoring-stack restore now auto-installs InfluxDB/Grafana packages if missing.
+**DR Testing (Feb 2026):** Added CLI `restore` and `restore-all` subcommands. Tested backup→restore for every service on production. Found and fixed 5 bugs. Restructured `init.sh` into two-phase flow (IPv6 disable → reboot → Docker install + schedule backups + restore all services). Full DR is now a single script: `init.sh` → reboot → everything restored automatically (~8 min total). Monitoring-stack restore auto-installs InfluxDB/Grafana packages. Full end-to-end DR tested on fresh Ubuntu 24.04 VPS (5/5 services OK).
 
 ## Completed Phases ✅
 
@@ -261,8 +261,9 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Fixed mailcow restore failing on non-zero exit from official `backup_and_restore.sh` (now checks output for restore activity)
 - ✅ Restructured `init.sh` into two-phase flow for correct IPv6/Docker ordering:
   - Phase 1: SSH keys, system packages, server-manager, disable IPv6, schedule phase 2, reboot
-  - Phase 2: (automatic via systemd oneshot) verify IPv6 disabled, install Docker, schedule backup cron jobs, self-clean
+  - Phase 2: (automatic via systemd oneshot) verify IPv6 disabled, install Docker, schedule backup cron jobs, restore all services, self-clean
   - Marker file (`/root/.init-phase2`) tracks state; systemd service auto-removes after completion
+  - Full DR is now a single script: `init.sh` → reboot → everything restored automatically
 - ✅ Tested all 5 service restores on production:
   - nginx: 15/15 proxy hosts verified
   - server-manager: config checksums match
@@ -297,7 +298,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 **Completed:** February 2026
 
 **Deliverables:**
-- [x] Bootstrap script for fresh VPS (`init.sh` - two-phase: pre-reboot setup + post-reboot Docker install)
+- [x] Bootstrap script for fresh VPS (`init.sh` - two-phase: pre-reboot setup + post-reboot Docker install + full restore)
 - [x] DNS requirements documentation (init.sh now detects public IP and lists domains to update)
 - [x] Recovery runbook (init.sh summary section with CLI restore commands)
 - [x] CLI restore subcommand for all 5 services (`cli.py restore <service>`)
@@ -308,7 +309,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - [x] Recovery time estimates from full test
 
 **Completed (Feb 2026):**
-- `init.sh` restructured into two-phase flow: phase 1 does SSH/packages/server-manager/IPv6 disable and reboots; phase 2 runs automatically via systemd oneshot to install Docker (IPv6 disabled at kernel level), schedule backup cron jobs (night window), then self-cleans
+- `init.sh` restructured into two-phase flow: phase 1 does SSH/packages/server-manager/IPv6 disable and reboots; phase 2 runs automatically via systemd oneshot to install Docker (IPv6 disabled at kernel level), schedule backup cron jobs (night window), restore all services via `cli.py restore-all`, then self-cleans
 - CLI `restore` subcommand with `--list`, `--archive`, `--yes` flags; `restore-all` for full DR
 - All 5 services individually tested: nginx (15 proxy hosts), server-manager (config), monitoring-stack (Grafana/InfluxDB), mailcow-directory (config/certs), mailcow (full data)
 - 5 bugs found and fixed during DR testing
@@ -319,11 +320,12 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 | Phase | Duration |
 |-------|----------|
 | init.sh Phase 1 (packages, server-manager, IPv6) | ~2 min |
-| Reboot + Phase 2 (Docker install, cron setup) | ~30 sec |
-| `restore-all` (all 5 services) | ~5m20s |
+| Reboot + Phase 2 (Docker, cron, restore-all) | ~6 min |
 | **Total (fresh VPS to fully operational)** | **~8 min** |
 
-Per-service restore times: server-manager 2.8s, nginx 29.6s, mailcow-directory 85.4s, mailcow 192.5s, monitoring-stack 10.0s (includes package install)
+Phase 2 is fully automated: Docker install → backup cron scheduling → `restore-all` (all 5 services).
+Per-service restore times: server-manager 2.8s, nginx 29.6s, mailcow-directory 85.4s, mailcow 192.5s, monitoring-stack 10.0s (includes package install).
+Only manual step after init.sh: update DNS A records to point to the new server IP.
 
 ---
 
@@ -507,7 +509,7 @@ The Server Manager has **successfully implemented the core functionality** with:
 - ✅ Modular, maintainable architecture
 - ✅ Proper CLI entry point for backup, restore, and cleanup (cli.py)
 - ✅ Flock-based cron mutex and logrotate
-- ✅ Bootstrap script (init.sh) with Docker install, IP detection, and CLI restore commands
+- ✅ One-touch DR script (init.sh) — single script restores entire server stack from bare VPS (~8 min)
 
 **The application is production-ready** with automated daily backups and tested disaster recovery.
 
