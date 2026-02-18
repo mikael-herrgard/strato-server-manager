@@ -784,30 +784,33 @@ class RestoreManager:
 
             if not influx_installed:
                 logger.info("Adding InfluxData APT repository...")
+                ensure_directory('/usr/share/keyrings')
                 run_command(
                     ['bash', '-c',
                      'curl -fsSL https://repos.influxdata.com/influxdata-archive_compat.key '
-                     '| gpg --dearmor -o /usr/share/keyrings/influxdb-keyring.gpg'],
+                     '| gpg --dearmor --yes -o /usr/share/keyrings/influxdb-keyring.gpg'],
                     check=True, timeout=60
                 )
+                # InfluxData only publishes up to jammy — use that for noble+
                 codename = subprocess.check_output(
                     ['lsb_release', '-cs'], text=True
                 ).strip()
+                influx_codename = codename if codename in ('focal', 'jammy') else 'jammy'
                 with open('/etc/apt/sources.list.d/influxdata.list', 'w') as f:
                     f.write(
                         f'deb [signed-by=/usr/share/keyrings/influxdb-keyring.gpg] '
-                        f'https://repos.influxdata.com/ubuntu {codename} stable\n'
+                        f'https://repos.influxdata.com/ubuntu {influx_codename} stable\n'
                     )
 
             if not grafana_installed:
                 logger.info("Adding Grafana APT repository...")
+                ensure_directory('/etc/apt/keyrings')
                 run_command(
                     ['bash', '-c',
                      'curl -fsSL https://apt.grafana.com/gpg.key '
-                     '| gpg --dearmor -o /etc/apt/keyrings/grafana.gpg'],
+                     '| gpg --dearmor --yes -o /etc/apt/keyrings/grafana.gpg'],
                     check=True, timeout=60
                 )
-                ensure_directory('/etc/apt/keyrings')
                 with open('/etc/apt/sources.list.d/grafana.list', 'w') as f:
                     f.write(
                         'deb [signed-by=/etc/apt/keyrings/grafana.gpg] '
