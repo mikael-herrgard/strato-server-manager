@@ -14,7 +14,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **Monitoring & Scheduling Update (Feb 2026):** Added monitoring-stack (Grafana/InfluxDB/pressuresuite-bridge) backup and restore with service stop/start for data consistency. Replaced per-service backup scheduling with queue-based approach (single time window, automatic spacing). Added Borg repo auto-initialization. Fixed `os.system()` command injection risk in restore.py, removed 5 unused Python dependencies, wired CLI cleanup to actual MaintenanceManager, fixed Docker install for Debian support, removed dead scheduling code, fixed aggressive `docker image prune -a`.
 
-**DR Testing (Feb 2026):** Added CLI `restore` and `restore-all` subcommands. Tested backup→restore for every service on production. Found and fixed 5 bugs. Restructured `init.sh` into two-phase flow (IPv6 disable → reboot → Docker install). Full DR is now: `init.sh` → reboot → `cli.py restore-all`. All services verified working after restore.
+**DR Testing (Feb 2026):** Added CLI `restore` and `restore-all` subcommands. Tested backup→restore for every service on production. Found and fixed 5 bugs. Restructured `init.sh` into two-phase flow (IPv6 disable → reboot → Docker install + schedule backups). Full DR is now: `init.sh` → reboot → `cli.py restore-all`. All services verified working after restore.
 
 ## Completed Phases ✅
 
@@ -261,7 +261,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Fixed mailcow restore failing on non-zero exit from official `backup_and_restore.sh` (now checks output for restore activity)
 - ✅ Restructured `init.sh` into two-phase flow for correct IPv6/Docker ordering:
   - Phase 1: SSH keys, system packages, server-manager, disable IPv6, schedule phase 2, reboot
-  - Phase 2: (automatic via systemd oneshot) verify IPv6 disabled, install Docker, print summary, self-clean
+  - Phase 2: (automatic via systemd oneshot) verify IPv6 disabled, install Docker, schedule backup cron jobs, self-clean
   - Marker file (`/root/.init-phase2`) tracks state; systemd service auto-removes after completion
 - ✅ Tested all 5 service restores on production:
   - nginx: 15/15 proxy hosts verified
@@ -297,7 +297,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - [ ] Recovery time estimates from full test
 
 **Completed (Feb 2026):**
-- `init.sh` restructured into two-phase flow: phase 1 does SSH/packages/server-manager/IPv6 disable and reboots; phase 2 runs automatically via systemd oneshot to install Docker with IPv6 fully disabled at kernel level, then self-cleans
+- `init.sh` restructured into two-phase flow: phase 1 does SSH/packages/server-manager/IPv6 disable and reboots; phase 2 runs automatically via systemd oneshot to install Docker (IPv6 disabled at kernel level), schedule backup cron jobs (night window), then self-cleans
 - CLI `restore` subcommand with `--list`, `--archive`, `--yes` flags; `restore-all` for full DR
 - All 5 services individually tested: nginx (15 proxy hosts), server-manager (config), monitoring-stack (Grafana/InfluxDB), mailcow-directory (config/certs), mailcow (full data)
 - 5 bugs found and fixed during DR testing
