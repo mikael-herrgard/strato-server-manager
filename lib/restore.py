@@ -315,7 +315,7 @@ class RestoreManager:
 
         # Select backup
         if backup_name == "latest":
-            selected_backup = backups[0]['name']
+            selected_backup = backups[-1]['name']
             logger.info(f"Using latest backup: {selected_backup}")
         else:
             selected_backup = backup_name
@@ -408,7 +408,7 @@ class RestoreManager:
 
         # Select backup
         if backup_name == "latest":
-            selected_backup = backups[0]['name']
+            selected_backup = backups[-1]['name']
             logger.info(f"Using latest backup: {selected_backup}")
         else:
             selected_backup = backup_name
@@ -574,7 +574,7 @@ class RestoreManager:
 
         # Select backup
         if backup_name == "latest":
-            selected_backup = backups[0]['name']
+            selected_backup = backups[-1]['name']
             logger.info(f"Using latest backup: {selected_backup}")
         else:
             selected_backup = backup_name
@@ -674,7 +674,7 @@ class RestoreManager:
 
         # Select backup
         if backup_name == "latest":
-            selected_backup = backups[0]['name']
+            selected_backup = backups[-1]['name']
             logger.info(f"Using latest backup: {selected_backup}")
         else:
             selected_backup = backup_name
