@@ -14,7 +14,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **Monitoring & Scheduling Update (Feb 2026):** Added monitoring-stack (Grafana/InfluxDB/pressuresuite-bridge) backup and restore with service stop/start for data consistency. Replaced per-service backup scheduling with queue-based approach (single time window, automatic spacing). Added Borg repo auto-initialization. Fixed `os.system()` command injection risk in restore.py, removed 5 unused Python dependencies, wired CLI cleanup to actual MaintenanceManager, fixed Docker install for Debian support, removed dead scheduling code, fixed aggressive `docker image prune -a`.
 
-**DR Testing (Feb 2026):** Added CLI `restore` and `restore-all` subcommands. Tested backup→restore for every service on production. Found and fixed 5 bugs. Restructured `init.sh` into two-phase flow (IPv6 disable → reboot → Docker install + schedule backups). Full DR is now: `init.sh` → reboot → `cli.py restore-all`. All services verified working after restore.
+**DR Testing (Feb 2026):** Added CLI `restore` and `restore-all` subcommands. Tested backup→restore for every service on production. Found and fixed 5 bugs. Restructured `init.sh` into two-phase flow (IPv6 disable → reboot → Docker install + schedule backups). Full DR is now: `init.sh` → reboot → `cli.py restore-all`. All services verified working after restore. Full end-to-end DR test completed on fresh VPS: init.sh → reboot → phase 2 auto-run → restore-all (5/5 services OK in 5m20s). Monitoring-stack restore now auto-installs InfluxDB/Grafana packages if missing.
 
 ## Completed Phases ✅
 
@@ -79,7 +79,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Mailcow restore (full data via official script)
 - ✅ Mailcow directory restore (config/certs with auto-restart)
 - ✅ Server-manager config restore
-- ✅ Monitoring-stack restore with service stop/start and permission setting
+- ✅ Monitoring-stack restore with package auto-install, service stop/start, and permission setting
 - ✅ Backup selection from remote
 - ✅ List available backups
 - ✅ Service verification after restore
@@ -87,7 +87,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Full DR restore command (`cli.py restore-all`)
 
 **Files Created:**
-- `lib/restore.py` (~870 lines)
+- `lib/restore.py` (~998 lines)
 - `lib/handlers/restore_handlers.py` (358 lines)
 
 **Key Features:**
@@ -269,6 +269,16 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
   - monitoring-stack: Grafana dashboards working
   - mailcow-directory: services auto-restarted
   - mailcow: all mailboxes and mail data intact
+- ✅ Monitoring-stack restore now auto-installs InfluxDB and Grafana packages if missing (fresh DR)
+  - Uses jammy codename fallback for Ubuntu 24.04+ (InfluxData has no noble repo)
+  - Updated InfluxData GPG key URL (old key expired 2026-01-17, new key valid to 2029)
+- ✅ Full end-to-end DR test on fresh VPS (Feb 18):
+  - Phase 1: hostname, SSH keys, packages, server-manager, IPv6 disable → reboot
+  - Phase 2: automatic Docker install, backup cron scheduling (14 seconds)
+  - `cli.py restore-all --yes`: all 5 services restored in 5m20s
+  - Recovery time breakdown: server-manager 2.8s, nginx 29.6s, mailcow-directory 85.4s, mailcow 192.5s, monitoring-stack 10.0s
+  - All 20 Docker containers running (2 nginx, 18 mailcow)
+  - All 3 systemd services active (influxdb, grafana-server, bridge timer)
 
 **Final Code Review Fixes (February 2026):**
 - ✅ Unified version strings to 1.2 across all files (`__init__.py`, `server_manager.py`, `ui.py`, `bootstrap.sh`)
@@ -282,8 +292,9 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 ## Remaining Work 🚧
 
-### 🔶 Phase 7: Disaster Recovery (MOSTLY COMPLETE)
-**Status:** ~80% Complete
+### ✅ Phase 7: Disaster Recovery (COMPLETE)
+**Status:** 100% Complete
+**Completed:** February 2026
 
 **Deliverables:**
 - [x] Bootstrap script for fresh VPS (`init.sh` - two-phase: pre-reboot setup + post-reboot Docker install)
@@ -293,18 +304,26 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - [x] Full DR restore command (`cli.py restore-all`) — single command to restore everything
 - [x] DR test of bootstrap.sh on production (Feb 17)
 - [x] DR test of all 5 service restores on production (Feb 18)
-- [ ] Full end-to-end DR test on fresh VPS (init.sh → restore all → verify)
-- [ ] Recovery time estimates from full test
+- [x] Full end-to-end DR test on fresh VPS (Feb 18)
+- [x] Recovery time estimates from full test
 
 **Completed (Feb 2026):**
 - `init.sh` restructured into two-phase flow: phase 1 does SSH/packages/server-manager/IPv6 disable and reboots; phase 2 runs automatically via systemd oneshot to install Docker (IPv6 disabled at kernel level), schedule backup cron jobs (night window), then self-cleans
 - CLI `restore` subcommand with `--list`, `--archive`, `--yes` flags; `restore-all` for full DR
 - All 5 services individually tested: nginx (15 proxy hosts), server-manager (config), monitoring-stack (Grafana/InfluxDB), mailcow-directory (config/certs), mailcow (full data)
 - 5 bugs found and fixed during DR testing
+- Monitoring-stack restore auto-installs InfluxDB/Grafana packages on fresh VPS
+- Full end-to-end DR test on fresh Ubuntu 24.04 VPS: `init.sh` → reboot → phase 2 auto → `restore-all` (5/5 OK, 5m20s)
 
-**Remaining Tasks:**
-1. Full end-to-end DR test on a fresh test VPS (run init.sh → reboot → `cli.py restore-all` → verify)
-2. Record recovery time estimates from full test
+**Recovery Time Estimates:**
+| Phase | Duration |
+|-------|----------|
+| init.sh Phase 1 (packages, server-manager, IPv6) | ~2 min |
+| Reboot + Phase 2 (Docker install, cron setup) | ~30 sec |
+| `restore-all` (all 5 services) | ~5m20s |
+| **Total (fresh VPS to fully operational)** | **~8 min** |
+
+Per-service restore times: server-manager 2.8s, nginx 29.6s, mailcow-directory 85.4s, mailcow 192.5s, monitoring-stack 10.0s (includes package install)
 
 ---
 
@@ -381,7 +400,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 | `lib/ui.py` | 682 | TUI interface |
 | `cli.py` | 145 | CLI entry point for cron |
 | `lib/backup.py` | 772 | Backup operations |
-| `lib/restore.py` | 801 | Restore operations |
+| `lib/restore.py` | 998 | Restore operations |
 | `lib/installation.py` | 399 | Installation automation |
 | `lib/scheduling.py` | 513 | Cron management |
 | `lib/maintenance.py` | 635 | Update operations |
@@ -406,9 +425,9 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 | **Monitoring** | 5 | 5 (100%) | 0 |
 | **Scheduling** | 7 | 7 (100%) | 0 (queue-based window scheduling) |
 | **Settings** | 1 | 1 (100%) | 0 |
-| **DR** | 6 | 5 (83%) | 1 (full end-to-end test on fresh VPS) |
+| **DR** | 6 | 6 (100%) | 0 |
 | **Testing** | 10 | 0 (0%) | 10 (Full phase) |
-| **TOTAL** | 53 | 45 (85%) | 8 (15%) |
+| **TOTAL** | 53 | 46 (87%) | 7 (13%) |
 
 ## Production Readiness Assessment
 
@@ -429,7 +448,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 | Gap | Priority | Impact | Mitigation |
 |-----|----------|--------|------------|
-| **Full end-to-end DR test** | MEDIUM | Untested on truly fresh VPS | Individual restores all tested on production |
+| **~~Full end-to-end DR test~~** | ~~MEDIUM~~ | ~~Untested on truly fresh VPS~~ | ✅ DONE — tested on fresh Ubuntu 24.04 VPS (Feb 18) |
 | **Unit Tests** | MEDIUM | Bugs may go unnoticed | Thorough manual and DR testing |
 | **Documentation** | MEDIUM | Users may struggle | Inline help, README, init.sh runbook |
 
@@ -437,10 +456,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 ### Short-Term
 
-1. **Full End-to-End DR Test**
-   - Spin up fresh test VPS
-   - Run init.sh → restore all 5 services via CLI → verify
-   - Record recovery time estimates
+1. **~~Full End-to-End DR Test~~** ✅ DONE (Feb 18 — fresh VPS, all 5 services, ~8 min total)
 
 2. **User Documentation**
    - Update README.md with CLI restore usage
@@ -498,7 +514,6 @@ The Server Manager has **successfully implemented the core functionality** with:
 ### What's Missing 🚧
 
 The remaining gaps are minor:
-- ℹ️ **Full end-to-end DR test on fresh VPS** (individual restores tested, full flow not yet)
 - ℹ️ **Unit/integration tests** (quality assurance, Phase 8)
 - ℹ️ **User documentation** (README covers basics, no detailed user guide yet)
 
@@ -514,15 +529,14 @@ The application is **ready for production use** with:
 - ✅ CLI and TUI restore paths
 
 **Optional next steps:**
-1. Full end-to-end DR test on a fresh VPS (init.sh → restore all → verify)
-2. User documentation
-3. Unit tests (Phase 8)
+1. User documentation
+2. Unit tests (Phase 8)
 
 ---
 
-**Project Status:** ✅ **CORE COMPLETE + DR TESTED** - Phases 1-6 Done, Phase 7 ~80%, Phase 8 Pending
+**Project Status:** ✅ **CORE COMPLETE + DR TESTED** - Phases 1-7 Done, Phase 8 Pending
 **Production Ready:** ✅ **YES**
-**Recommended Next Step:** Full end-to-end DR test on fresh VPS
+**Recommended Next Step:** User documentation and unit tests (Phase 8)
 
 **Last Updated:** 2026-02-18
 **Version:** 1.2
