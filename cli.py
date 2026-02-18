@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Server Manager CLI
-Entry point for automated backup and cleanup operations called by cron.
+Entry point for automated backup, restore, and cleanup operations.
 """
 
 import argparse
@@ -13,6 +13,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.backup import BackupManager
+from lib.restore import RestoreManager
 from lib.maintenance import MaintenanceManager
 from lib.notifications import NotificationManager
 
@@ -77,6 +78,62 @@ def cmd_backup(args):
         sys.exit(1)
 
 
+def cmd_restore(args):
+    """Restore a service from a Borg backup."""
+    service = args.service
+    archive = args.archive
+
+    restore_mgr = RestoreManager()
+
+    # List mode — show available backups and exit
+    if args.list:
+        print(f"Available backups for {service}:")
+        backups = restore_mgr.list_remote_backups(service)
+        if not backups:
+            print("  No backups found.")
+            sys.exit(1)
+        for b in backups:
+            print(f"  {b['name']}")
+        sys.exit(0)
+
+    # Confirmation prompt (skip with --yes)
+    backup_label = archive if archive else "latest"
+    if not args.yes:
+        print(f"About to restore {service} from backup: {backup_label}")
+        print("This will stop the service, replace its data, and restart it.")
+        answer = input("Continue? [y/N] ").strip().lower()
+        if answer != 'y':
+            print("Restore cancelled.")
+            sys.exit(0)
+
+    start_time = datetime.now()
+
+    try:
+        if service == "nginx":
+            success = restore_mgr.restore_nginx(backup_name=archive)
+        elif service == "mailcow":
+            success = restore_mgr.restore_mailcow(backup_name=archive)
+        elif service == "mailcow-directory":
+            success = restore_mgr.restore_mailcow_directory(backup_name=archive)
+        elif service == "monitoring-stack":
+            success = restore_mgr.restore_monitoring_stack(backup_name=archive)
+        else:
+            print(f"Error: Unknown service: {service}")
+            sys.exit(1)
+
+        duration = (datetime.now() - start_time).total_seconds()
+
+        if success:
+            print(f"Restore completed successfully in {duration:.2f} seconds")
+        else:
+            print("Restore failed — check logs at /opt/server-manager/logs/server-manager.log")
+            sys.exit(1)
+
+    except Exception as e:
+        print(f"Restore error: {e}")
+        sys.exit(1)
+
+
 def cmd_cleanup(args):
     """Clean up old pre-update, pre-restore, and rollback directories."""
     retention_days = args.retention_days
@@ -137,6 +194,27 @@ def main():
         help="Verify backup after creation"
     )
     backup_parser.set_defaults(func=cmd_backup)
+
+    # restore subcommand
+    restore_parser = subparsers.add_parser("restore", help="Restore a service from backup")
+    restore_parser.add_argument(
+        "service",
+        choices=["nginx", "mailcow", "mailcow-directory", "monitoring-stack"],
+        help="Service to restore"
+    )
+    restore_parser.add_argument(
+        "--archive", default="latest",
+        help="Archive name to restore (default: latest)"
+    )
+    restore_parser.add_argument(
+        "--list", action="store_true", default=False,
+        help="List available backups and exit"
+    )
+    restore_parser.add_argument(
+        "--yes", "-y", action="store_true", default=False,
+        help="Skip confirmation prompt"
+    )
+    restore_parser.set_defaults(func=cmd_restore)
 
     # cleanup subcommand
     cleanup_parser = subparsers.add_parser("cleanup", help="Clean up old backups")
