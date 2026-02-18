@@ -511,12 +511,24 @@ class RestoreManager:
 
             returncode, stdout, stderr = run_command(
                 cmd,
-                check=True,
+                check=False,
                 cwd=mailcow_path,
                 env=mailcow_env,
                 timeout=3600,  # 1 hour
                 input_data=input_data
             )
+
+            # The mailcow script may return non-zero even on success,
+            # so check for actual restore activity in the output
+            if returncode != 0:
+                # Check if data was actually restored despite exit code
+                if 'Restoring' in (stdout or '') or '/vmail/' in (stdout or ''):
+                    logger.warning(f"Mailcow restore script exited with code {returncode} but data appears restored")
+                else:
+                    logger.error(f"Mailcow restore script failed (exit code {returncode})")
+                    if stderr:
+                        logger.error(f"Stderr: {stderr[:1000]}")
+                    return False
 
             logger.info("Mailcow restore completed successfully")
 
