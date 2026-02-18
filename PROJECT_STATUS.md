@@ -273,11 +273,11 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Monitoring-stack restore now auto-installs InfluxDB and Grafana packages if missing (fresh DR)
   - Uses jammy codename fallback for Ubuntu 24.04+ (InfluxData has no noble repo)
   - Updated InfluxData GPG key URL (old key expired 2026-01-17, new key valid to 2029)
-- ✅ Full end-to-end DR test on fresh VPS (Feb 18):
-  - Phase 1: hostname, SSH keys, packages, server-manager, IPv6 disable → reboot
-  - Phase 2: automatic Docker install, backup cron scheduling (14 seconds)
-  - `cli.py restore-all --yes`: all 5 services restored in 5m20s
-  - Recovery time breakdown: server-manager 2.8s, nginx 29.6s, mailcow-directory 85.4s, mailcow 192.5s, monitoring-stack 10.0s
+- ✅ Full end-to-end DR test on fresh VPS (Feb 18) — two rounds:
+  - Round 1 (manual restore-all): Phase 1 → reboot → Phase 2 (Docker + cron) → `cli.py restore-all`: 5/5 OK in 5m20s
+  - Round 2 (fully automated init.sh): Phase 1 → reboot → Phase 2 (Docker + cron + restore-all): 4/5 OK, monitoring-stack timed out
+  - Found and fixed: `apt-get install` timeout too short for Grafana (300s → 600s), systemd oneshot default timeout too short (added `TimeoutStartSec=1800`), half-configured packages after timeout (added `dpkg --configure -a` recovery step)
+  - After fixes: monitoring-stack retry succeeded, all 5 services running
   - All 20 Docker containers running (2 nginx, 18 mailcow)
   - All 3 systemd services active (influxdb, grafana-server, bridge timer)
 
@@ -314,7 +314,8 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - All 5 services individually tested: nginx (15 proxy hosts), server-manager (config), monitoring-stack (Grafana/InfluxDB), mailcow-directory (config/certs), mailcow (full data)
 - 5 bugs found and fixed during DR testing
 - Monitoring-stack restore auto-installs InfluxDB/Grafana packages on fresh VPS
-- Full end-to-end DR test on fresh Ubuntu 24.04 VPS: `init.sh` → reboot → phase 2 auto → `restore-all` (5/5 OK, 5m20s)
+- Full end-to-end DR test on fresh Ubuntu 24.04 VPS: `init.sh` → reboot → phase 2 auto → `restore-all` (5/5 OK)
+- Fixed package install timeout (300s → 600s), systemd oneshot timeout (`TimeoutStartSec=1800`), and half-configured package recovery (`dpkg --configure -a`)
 
 **Recovery Time Estimates:**
 | Phase | Duration |
