@@ -317,16 +317,23 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - Full end-to-end DR test on fresh Ubuntu 24.04 VPS: `init.sh` → reboot → phase 2 auto → `restore-all` (5/5 OK)
 - Fixed package install timeout (300s → 600s), systemd oneshot timeout (`TimeoutStartSec=1800`), and half-configured package recovery (`dpkg --configure -a`)
 
-**Recovery Time Estimates:**
-| Phase | Duration |
-|-------|----------|
-| init.sh Phase 1 (packages, server-manager, IPv6) | ~2 min |
-| Reboot + Phase 2 (Docker, cron, restore-all) | ~6 min |
-| **Total (fresh VPS to fully operational)** | **~8 min** |
+**Recovery Time Estimates (measured on fresh Ubuntu 24.04 VPS, Feb 18):**
 
-Phase 2 is fully automated: Docker install → backup cron scheduling → `restore-all` (all 5 services).
-Per-service restore times: server-manager 2.8s, nginx 29.6s, mailcow-directory 85.4s, mailcow 192.5s, monitoring-stack 10.0s (includes package install).
-Only manual step after init.sh: update DNS A records to point to the new server IP.
+| Phase | Duration | Details |
+|-------|----------|---------|
+| init.sh Phase 1 | ~2 min | Hostname, SSH keys, packages, server-manager, IPv6 disable |
+| Reboot | ~15 sec | Kernel reload with ipv6.disable=1 |
+| Phase 2: Docker install | ~10 sec | Docker CE + compose plugin |
+| Phase 2: Cron scheduling | ~1 sec | 5 backup jobs (night window) |
+| Phase 2: restore server-manager | ~2.5 sec | Config files from Borg |
+| Phase 2: restore nginx | ~29 sec | NPM containers + database |
+| Phase 2: restore mailcow-directory | ~84 sec | Config, certs, docker compose up (image pulls) |
+| Phase 2: restore mailcow | ~190 sec | Full mail data via official restore script |
+| Phase 2: restore monitoring-stack | ~5-7 min | Package install (InfluxDB + Grafana ~200MB) + data restore |
+| **Total (fresh VPS to fully operational)** | **~12-15 min** | All 20 Docker containers + 3 systemd services running |
+
+Phase 1 is interactive (hostname + email prompts). Everything after reboot is fully automated.
+Only manual step after init.sh completes: update DNS A records to point to the new server IP.
 
 ---
 
