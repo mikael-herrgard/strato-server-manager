@@ -174,7 +174,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 **Key Features:**
 - Queue-based backup scheduling — pick one time window, all 5 services spaced automatically
 - Four time windows: Night (02:00), Morning (08:00), Afternoon (14:00), Evening (20:00)
-- Jobs ordered fastest-first: nginx → mailcow-directory → mailcow → server-manager → monitoring-stack
+- All 5 services run daily, ordered fastest-first: nginx → mailcow-directory → mailcow → server-manager → monitoring-stack
 - Email notifications for success/failure
 - SMTP configuration via TUI
 - Automated cleanup with retention policies (CLI wired to MaintenanceManager)
@@ -199,7 +199,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **Hardening & Cleanup (February 2026):**
 - ✅ Created `cli.py` CLI entry point, replacing fragile temp-Python-script pattern in shell scripts
-- ✅ Added `backup_server_manager()` for weekly config backup (settings.yaml, notifications.yaml)
+- ✅ Added `backup_server_manager()` for daily config backup (settings.yaml, notifications.yaml)
 - ✅ Upgraded from borg12 to borg14 on rsync.net
 - ✅ Fixed `show_radiolist` return value bug in backup_handlers.py (would crash on mailcow backup type selection)
 - ✅ Fixed swapped title/text arguments in radiolist dialog
@@ -270,7 +270,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **Completed (Feb 2026):**
 - `init.sh` enhanced with public IP detection, settings.yaml auto-customization, notifications.yaml setup prompt, and expanded DR checklist
-- Server-manager config now backed up weekly to rsync.net (recoverable via Borg)
+- Server-manager config now backed up daily to rsync.net (recoverable via Borg)
 
 **Remaining Tasks:**
 1. Add `--auto-recover` CLI flag to server_manager.py
@@ -527,5 +527,5 @@ The application is **ready for production use** for:
 **Production Ready:** ✅ **YES** (with manual DR testing)
 **Recommended Next Step:** ⚠️ **Test disaster recovery on test VPS, configure SMTP notification credentials**
 
-**Last Updated:** 2026-02-17
+**Last Updated:** 2026-02-18
 **Version:** 1.2
