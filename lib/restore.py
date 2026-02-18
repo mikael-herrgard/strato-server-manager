@@ -632,13 +632,20 @@ class RestoreManager:
                     os.chmod(script_path, 0o755)
 
             logger.info("Mailcow directory restore completed successfully")
-            logger.info("")
-            logger.info("Next steps for full recovery:")
-            logger.info(f"  1. Pull Docker images: cd {mailcow_path} && docker compose pull")
-            logger.info(f"  2. Start services: docker compose up -d")
-            logger.info(f"  3. If restoring data: docker compose down")
-            logger.info(f"  4. Restore mailcow data backup using backup_and_restore.sh")
-            logger.info(f"  5. Start services again: docker compose up -d")
+
+            # Start services (docker compose up -d will pull images if needed)
+            logger.info("Starting Mailcow services...")
+            self._start_service(mailcow_path)
+
+            # Wait for services to start
+            import time
+            time.sleep(20)
+
+            # Verify services are running
+            if self._verify_service_running(mailcow_path):
+                logger.info("Mailcow services are running")
+            else:
+                logger.warning("Mailcow restored but services may not be running properly")
 
             return True
 
