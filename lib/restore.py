@@ -828,7 +828,7 @@ class RestoreManager:
 
             run_command(
                 ['apt-get', 'install', '-y'] + packages,
-                check=True, timeout=300
+                check=True, timeout=600
             )
 
             # Stop services — restore will replace data and start them
