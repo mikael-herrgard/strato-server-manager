@@ -776,6 +776,9 @@ class RestoreManager:
         logger.info("Installing monitoring stack packages...")
 
         try:
+            # Fix any packages left in a half-configured state (e.g. from a prior timeout)
+            run_command(['dpkg', '--configure', '-a'], check=False, timeout=120)
+
             # Ensure prerequisites
             run_command(
                 ['apt-get', 'install', '-y', 'apt-transport-https', 'gnupg', 'curl'],
