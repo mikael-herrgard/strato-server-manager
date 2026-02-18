@@ -787,7 +787,7 @@ class RestoreManager:
                 ensure_directory('/usr/share/keyrings')
                 run_command(
                     ['bash', '-c',
-                     'curl -fsSL https://repos.influxdata.com/influxdata-archive_compat.key '
+                     'curl -fsSL https://repos.influxdata.com/influxdata-archive.key '
                      '| gpg --dearmor --yes -o /usr/share/keyrings/influxdb-keyring.gpg'],
                     check=True, timeout=60
                 )
