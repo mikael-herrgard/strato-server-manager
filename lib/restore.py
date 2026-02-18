@@ -750,6 +750,95 @@ class RestoreManager:
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
 
+    def _install_monitoring_packages(self) -> bool:
+        """
+        Install InfluxDB and Grafana packages if not already present.
+
+        Adds the official APT repositories and GPG keys, then installs
+        influxdb2, influxdb2-cli, and grafana. Stops services after install
+        so the restore can replace their data.
+
+        Returns:
+            True if packages are installed (or were already installed)
+        """
+        # Check if already installed
+        influx_installed = subprocess.run(
+            ['dpkg', '-s', 'influxdb2'], capture_output=True
+        ).returncode == 0
+        grafana_installed = subprocess.run(
+            ['dpkg', '-s', 'grafana'], capture_output=True
+        ).returncode == 0
+
+        if influx_installed and grafana_installed:
+            logger.info("InfluxDB and Grafana already installed")
+            return True
+
+        logger.info("Installing monitoring stack packages...")
+
+        try:
+            # Ensure prerequisites
+            run_command(
+                ['apt-get', 'install', '-y', 'apt-transport-https', 'gnupg', 'curl'],
+                check=True, timeout=120
+            )
+
+            if not influx_installed:
+                logger.info("Adding InfluxData APT repository...")
+                run_command(
+                    ['bash', '-c',
+                     'curl -fsSL https://repos.influxdata.com/influxdata-archive_compat.key '
+                     '| gpg --dearmor -o /usr/share/keyrings/influxdb-keyring.gpg'],
+                    check=True, timeout=60
+                )
+                codename = subprocess.check_output(
+                    ['lsb_release', '-cs'], text=True
+                ).strip()
+                with open('/etc/apt/sources.list.d/influxdata.list', 'w') as f:
+                    f.write(
+                        f'deb [signed-by=/usr/share/keyrings/influxdb-keyring.gpg] '
+                        f'https://repos.influxdata.com/ubuntu {codename} stable\n'
+                    )
+
+            if not grafana_installed:
+                logger.info("Adding Grafana APT repository...")
+                run_command(
+                    ['bash', '-c',
+                     'curl -fsSL https://apt.grafana.com/gpg.key '
+                     '| gpg --dearmor -o /etc/apt/keyrings/grafana.gpg'],
+                    check=True, timeout=60
+                )
+                ensure_directory('/etc/apt/keyrings')
+                with open('/etc/apt/sources.list.d/grafana.list', 'w') as f:
+                    f.write(
+                        'deb [signed-by=/etc/apt/keyrings/grafana.gpg] '
+                        'https://apt.grafana.com stable main\n'
+                    )
+
+            # Update and install
+            run_command(['apt-get', 'update'], check=True, timeout=120)
+
+            packages = []
+            if not influx_installed:
+                packages += ['influxdb2', 'influxdb2-cli']
+            if not grafana_installed:
+                packages += ['grafana']
+
+            run_command(
+                ['apt-get', 'install', '-y'] + packages,
+                check=True, timeout=300
+            )
+
+            # Stop services — restore will replace data and start them
+            for svc in ['influxdb', 'grafana-server']:
+                run_command(['systemctl', 'stop', svc], check=False, timeout=30)
+
+            logger.info("Monitoring stack packages installed successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to install monitoring packages: {e}")
+            return False
+
     def restore_monitoring_stack(self, backup_name: str = "latest") -> bool:
         """
         Restore monitoring stack (Grafana, InfluxDB, pressuresuite-influx-bridge) from backup
@@ -761,6 +850,11 @@ class RestoreManager:
             True if successful
         """
         logger.info(f"Starting monitoring stack restore (backup: {backup_name})")
+
+        # Install packages if not present (needed for fresh DR)
+        if not self._install_monitoring_packages():
+            logger.error("Failed to install monitoring stack packages")
+            return False
 
         # Get configuration
         monitoring_config = self.config.get_monitoring_stack_config()
