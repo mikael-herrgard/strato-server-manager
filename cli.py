@@ -136,6 +136,76 @@ def cmd_restore(args):
         sys.exit(1)
 
 
+RESTORE_ORDER = [
+    ('server-manager',    'restore_server_manager'),
+    ('nginx',             'restore_nginx'),
+    ('mailcow-directory', 'restore_mailcow_directory'),
+    ('mailcow',           'restore_mailcow'),
+    ('monitoring-stack',  'restore_monitoring_stack'),
+]
+
+
+def cmd_restore_all(args):
+    """Restore all services from latest backups in DR order."""
+    restore_mgr = RestoreManager()
+
+    # Confirmation prompt
+    if not args.yes:
+        print("Full restore will restore ALL services in this order:")
+        for i, (service, _) in enumerate(RESTORE_ORDER, 1):
+            print(f"  {i}. {service}")
+        print("")
+        print("Each service will be restored from its latest backup.")
+        print("This will stop and restart services as needed.")
+        answer = input("\nContinue? [y/N] ").strip().lower()
+        if answer != 'y':
+            print("Restore cancelled.")
+            sys.exit(0)
+
+    total_start = datetime.now()
+    results = []
+
+    for service, method_name in RESTORE_ORDER:
+        print(f"\n{'='*60}")
+        print(f"Restoring {service}...")
+        print(f"{'='*60}")
+
+        start_time = datetime.now()
+
+        try:
+            method = getattr(restore_mgr, method_name)
+            success = method(backup_name="latest")
+            duration = (datetime.now() - start_time).total_seconds()
+
+            if success:
+                print(f"  {service}: OK ({duration:.1f}s)")
+                results.append((service, True, duration, None))
+            else:
+                print(f"  {service}: FAILED ({duration:.1f}s)")
+                results.append((service, False, duration, "Restore returned false"))
+        except Exception as e:
+            duration = (datetime.now() - start_time).total_seconds()
+            print(f"  {service}: ERROR — {e}")
+            results.append((service, False, duration, str(e)))
+
+    # Summary
+    total_duration = (datetime.now() - total_start).total_seconds()
+    succeeded = sum(1 for _, ok, _, _ in results if ok)
+    failed = len(results) - succeeded
+
+    print(f"\n{'='*60}")
+    print(f"Full Restore Summary ({total_duration:.1f}s total)")
+    print(f"{'='*60}")
+    for service, ok, duration, error in results:
+        status = "OK" if ok else f"FAILED: {error}"
+        print(f"  {service:25s} {duration:7.1f}s  {status}")
+    print(f"\n  {succeeded} succeeded, {failed} failed")
+
+    if failed > 0:
+        print("\nCheck logs: /opt/server-manager/logs/server-manager.log")
+        sys.exit(1)
+
+
 def cmd_cleanup(args):
     """Clean up old pre-update, pre-restore, and rollback directories."""
     retention_days = args.retention_days
@@ -180,7 +250,7 @@ def cmd_cleanup(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Server Manager CLI for automated backup and cleanup operations"
+        description="Server Manager CLI for backup, restore, and cleanup operations"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -217,6 +287,16 @@ def main():
         help="Skip confirmation prompt"
     )
     restore_parser.set_defaults(func=cmd_restore)
+
+    # restore-all subcommand
+    restore_all_parser = subparsers.add_parser(
+        "restore-all", help="Restore all services from latest backups (full DR)"
+    )
+    restore_all_parser.add_argument(
+        "--yes", "-y", action="store_true", default=False,
+        help="Skip confirmation prompt"
+    )
+    restore_all_parser.set_defaults(func=cmd_restore_all)
 
     # cleanup subcommand
     cleanup_parser = subparsers.add_parser("cleanup", help="Clean up old backups")
