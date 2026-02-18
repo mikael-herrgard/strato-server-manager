@@ -19,8 +19,8 @@ class SchedulingManager:
         {'service': 'nginx',             'frequency': 'daily',  'offset_minutes': 0},
         {'service': 'mailcow-directory', 'frequency': 'daily',  'offset_minutes': 30},
         {'service': 'mailcow',           'frequency': 'daily',  'offset_minutes': 60},
-        {'service': 'server-manager',    'frequency': 'weekly', 'offset_minutes': 180},
-        {'service': 'monitoring-stack',  'frequency': 'weekly', 'offset_minutes': 210},
+        {'service': 'server-manager',    'frequency': 'daily',  'offset_minutes': 180},
+        {'service': 'monitoring-stack',  'frequency': 'daily',  'offset_minutes': 210},
     ]
 
     BACKUP_WINDOWS = {
