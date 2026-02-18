@@ -14,7 +14,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **Monitoring & Scheduling Update (Feb 2026):** Added monitoring-stack (Grafana/InfluxDB/pressuresuite-bridge) backup and restore with service stop/start for data consistency. Replaced per-service backup scheduling with queue-based approach (single time window, automatic spacing). Added Borg repo auto-initialization. Fixed `os.system()` command injection risk in restore.py, removed 5 unused Python dependencies, wired CLI cleanup to actual MaintenanceManager, fixed Docker install for Debian support, removed dead scheduling code, fixed aggressive `docker image prune -a`.
 
-**DR Testing (Feb 2026):** Added CLI `restore` subcommand for all 5 services. Tested backup→restore for every service on production. Found and fixed 5 bugs: restore selected oldest backup instead of latest (`backups[0]` vs `backups[-1]`), mailcow-directory didn't restart services, mailcow restore failed on non-zero exit from official script, no CLI restore subcommand existed, no `restore_server_manager` method existed. Added Docker installation to `init.sh`. All services verified working after restore.
+**DR Testing (Feb 2026):** Added CLI `restore` subcommand for all 5 services. Tested backup→restore for every service on production. Found and fixed 5 bugs: restore selected oldest backup instead of latest (`backups[0]` vs `backups[-1]`), mailcow-directory didn't restart services, mailcow restore failed on non-zero exit from official script, no CLI restore subcommand existed, no `restore_server_manager` method existed. Restructured `init.sh` into two-phase flow: phase 1 sets up SSH/packages/server-manager and disables IPv6, reboots; phase 2 runs automatically after reboot via systemd oneshot to install Docker with IPv6 fully disabled at kernel level. All services verified working after restore.
 
 ## Completed Phases ✅
 
@@ -256,8 +256,10 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Fixed restore selecting oldest backup instead of latest (`backups[0]` → `backups[-1]` — borg list returns oldest-first)
 - ✅ Fixed mailcow-directory restore not restarting services (now runs `docker compose up -d` automatically)
 - ✅ Fixed mailcow restore failing on non-zero exit from official `backup_and_restore.sh` (now checks output for restore activity)
-- ✅ Added Docker installation to `init.sh` (detects Debian/Ubuntu)
-- ✅ Updated `init.sh` DR summary with CLI restore commands
+- ✅ Restructured `init.sh` into two-phase flow for correct IPv6/Docker ordering:
+  - Phase 1: SSH keys, system packages, server-manager, disable IPv6, schedule phase 2, reboot
+  - Phase 2: (automatic via systemd oneshot) verify IPv6 disabled, install Docker, print summary, self-clean
+  - Marker file (`/root/.init-phase2`) tracks state; systemd service auto-removes after completion
 - ✅ Tested all 5 service restores on production:
   - nginx: 15/15 proxy hosts verified
   - server-manager: config checksums match
@@ -281,7 +283,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 **Status:** ~80% Complete
 
 **Deliverables:**
-- [x] Bootstrap script for fresh VPS (`init.sh` - improved Feb 2026, now includes Docker install)
+- [x] Bootstrap script for fresh VPS (`init.sh` - two-phase: pre-reboot setup + post-reboot Docker install)
 - [x] DNS requirements documentation (init.sh now detects public IP and lists domains to update)
 - [x] Recovery runbook (init.sh summary section with CLI restore commands)
 - [x] CLI restore subcommand for all 5 services (`cli.py restore <service>`)
@@ -291,7 +293,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - [ ] Recovery time estimates from full test
 
 **Completed (Feb 2026):**
-- `init.sh` enhanced with Docker install, public IP detection, settings.yaml auto-customization, notifications.yaml setup, CLI restore commands in summary
+- `init.sh` restructured into two-phase flow: phase 1 does SSH/packages/server-manager/IPv6 disable and reboots; phase 2 runs automatically via systemd oneshot to install Docker with IPv6 fully disabled at kernel level, then self-cleans
 - CLI `restore` subcommand with `--list`, `--archive`, `--yes` flags
 - All 5 services individually tested: nginx (15 proxy hosts), server-manager (config), monitoring-stack (Grafana/InfluxDB), mailcow-directory (config/certs), mailcow (full data)
 - 5 bugs found and fixed during DR testing
