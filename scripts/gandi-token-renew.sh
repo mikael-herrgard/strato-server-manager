@@ -15,7 +15,7 @@ set -euo pipefail
 
 # Configuration
 CREDENTIALS_FILE="/root/.credentials.env"
-CERTBOT_CRED_FILE="/root/nginx/letsencrypt/credentials/credentials-gandi"
+CERTBOT_CRED_DIR="/root/nginx/letsencrypt/credentials"
 LOG_FILE="/var/log/gandi-token-renew.log"
 BASE_DIR="/opt/server-manager"
 VENV_PYTHON="${BASE_DIR}/venv/bin/python3"
@@ -146,11 +146,23 @@ NEW_EXPIRES_IN=$(echo "$VERIFY_RESPONSE" | jq -r '.expires_in // empty')
 NEW_DAYS=$((NEW_EXPIRES_IN / 86400))
 log "New token verified successfully ($NEW_DAYS days remaining)"
 
-# Sync certbot credential file
-if [[ -d "$(dirname "$CERTBOT_CRED_FILE")" ]]; then
-    echo "dns_gandi_token=${NEW_TOKEN}" > "$CERTBOT_CRED_FILE"
-    chmod 600 "$CERTBOT_CRED_FILE"
-    log "Certbot credential file updated: $CERTBOT_CRED_FILE"
+# Sync all certbot credential files containing dns_gandi_token
+if [[ -d "$CERTBOT_CRED_DIR" ]]; then
+    synced=0
+    for cred_file in "$CERTBOT_CRED_DIR"/credentials-*; do
+        [[ -f "$cred_file" ]] || continue
+        if grep -q "^dns_gandi_token=" "$cred_file"; then
+            sed -i "s|^dns_gandi_token=.*|dns_gandi_token=${NEW_TOKEN}|" "$cred_file"
+            chmod 600 "$cred_file"
+            log "Updated Gandi token in: $cred_file"
+            ((synced++))
+        fi
+    done
+    if (( synced == 0 )); then
+        log "WARNING: No certbot credential files contain dns_gandi_token"
+    else
+        log "Synced Gandi token to $synced certbot credential file(s)"
+    fi
 else
     log "WARNING: Certbot credentials directory does not exist, skipping sync"
 fi

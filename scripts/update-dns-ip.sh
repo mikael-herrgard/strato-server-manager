@@ -51,9 +51,20 @@ sync_certbot_credentials() {
     chmod 600 /root/nginx/letsencrypt/credentials/credentials-2
 
     if [ -n "$GANDI_TOKEN" ]; then
-        echo "dns_gandi_token=$GANDI_TOKEN" \
-          > /root/nginx/letsencrypt/credentials/credentials-gandi
-        chmod 600 /root/nginx/letsencrypt/credentials/credentials-gandi
+        local cred_dir="/root/nginx/letsencrypt/credentials"
+        local gandi_synced=0
+        for cred_file in "$cred_dir"/credentials-*; do
+            [ -f "$cred_file" ] || continue
+            if grep -q "^dns_gandi_token=" "$cred_file"; then
+                sed -i "s|^dns_gandi_token=.*|dns_gandi_token=$GANDI_TOKEN|" "$cred_file"
+                chmod 600 "$cred_file"
+                ((gandi_synced++))
+            fi
+        done
+        if [ "$gandi_synced" -eq 0 ]; then
+            echo "dns_gandi_token=$GANDI_TOKEN" > "$cred_dir/credentials-gandi"
+            chmod 600 "$cred_dir/credentials-gandi"
+        fi
     fi
     log "Certbot credential files synced from .credentials.env"
 }
