@@ -326,6 +326,72 @@ class RestoreHandlers:
             logger.error(f"Monitoring stack restore error: {e}")
             self.ui.show_error(f"Restore failed:\n\n{e}")
 
+    def handle_restore_credentials(self):
+        """Restore credentials from backup"""
+        try:
+            restore_mgr = self._get_restore_manager()
+
+            # List available backups
+            self.ui.show_infobox("Retrieving backup list from remote Borg archive...\n\nPlease wait...")
+            backups = restore_mgr.list_remote_backups('credentials')
+
+            if not backups:
+                self.ui.show_error(
+                    "No credentials backups found on remote server.\n\n"
+                    "Create a backup first:\n"
+                    "  Backup Management → Backup Credentials"
+                )
+                return
+
+            # Build selection list
+            backup_items = [("latest", "Latest backup (recommended)")]
+            for backup in backups[:10]:
+                backup_items.append((backup['name'], backup['name']))
+
+            # Show selection dialog
+            selected_backup = self.ui.select_from_list(
+                backup_items,
+                "Select credentials backup to restore (remote Borg archive):",
+                "Restore Credentials"
+            )
+
+            if not selected_backup:
+                return
+
+            # Confirm restore
+            if not self.ui.confirm_action(
+                f"This will restore credentials from remote Borg archive:\n\n"
+                f"  {selected_backup}\n\n"
+                "Source: Remote rsync server (Borg repository)\n\n"
+                "This restores:\n"
+                "  • /root/.credentials.env (API tokens)\n"
+                "  • /root/.dns-config (domain-to-provider mapping)\n\n"
+                "Certbot credential files will also be synced.\n\n"
+                "Continue?",
+                "Restore Credentials"
+            ):
+                return
+
+            self.ui.show_infobox(
+                "Downloading and restoring credentials from remote Borg archive...\n\n"
+                "This should be very fast."
+            )
+
+            success = restore_mgr.restore_credentials(selected_backup)
+
+            if success:
+                self.ui.show_success(
+                    "Credentials restored successfully!\n\n"
+                    "Certbot credential files have been synced."
+                )
+                logger.info(f"Credentials restore completed via TUI from {selected_backup}")
+            else:
+                self.ui.show_error("Credentials restore failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Credentials restore error: {e}")
+            self.ui.show_error(f"Restore failed:\n\n{e}")
+
     def handle_list_backups(self):
         """List available backups"""
         try:
@@ -338,7 +404,7 @@ class RestoreHandlers:
             backup_text += "=" * 95 + "\n"
             backup_text += "Storage: Remote rsync server via Borg repositories\n\n"
 
-            for service in ['nginx', 'mailcow', 'mailcow-directory', 'server-manager', 'monitoring-stack']:
+            for service in ['nginx', 'mailcow', 'mailcow-directory', 'server-manager', 'monitoring-stack', 'credentials']:
                 backups = restore_mgr.list_remote_backups(service)
 
                 backup_text += f"{service.upper()}:\n"

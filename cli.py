@@ -39,6 +39,8 @@ def cmd_backup(args):
             success = backup_mgr.backup_server_manager(verify=verify)
         elif service == "monitoring-stack":
             success = backup_mgr.backup_monitoring_stack(verify=verify)
+        elif service == "credentials":
+            success = backup_mgr.backup_credentials(verify=verify)
         else:
             print(f"Error: Unknown service: {service}")
             sys.exit(1)
@@ -119,6 +121,8 @@ def cmd_restore(args):
             success = restore_mgr.restore_server_manager(backup_name=archive)
         elif service == "monitoring-stack":
             success = restore_mgr.restore_monitoring_stack(backup_name=archive)
+        elif service == "credentials":
+            success = restore_mgr.restore_credentials(backup_name=archive)
         else:
             print(f"Error: Unknown service: {service}")
             sys.exit(1)
@@ -258,7 +262,7 @@ def main():
     backup_parser = subparsers.add_parser("backup", help="Run a backup")
     backup_parser.add_argument(
         "service",
-        choices=["nginx", "mailcow", "mailcow-directory", "server-manager", "monitoring-stack"],
+        choices=["nginx", "mailcow", "mailcow-directory", "server-manager", "monitoring-stack", "credentials"],
         help="Service to back up"
     )
     backup_parser.add_argument(
@@ -271,7 +275,7 @@ def main():
     restore_parser = subparsers.add_parser("restore", help="Restore a service from backup")
     restore_parser.add_argument(
         "service",
-        choices=["nginx", "mailcow", "mailcow-directory", "server-manager", "monitoring-stack"],
+        choices=["nginx", "mailcow", "mailcow-directory", "server-manager", "monitoring-stack", "credentials"],
         help="Service to restore"
     )
     restore_parser.add_argument(

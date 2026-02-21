@@ -16,6 +16,8 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **DR Testing (Feb 2026):** Added CLI `restore` and `restore-all` subcommands. Tested backup→restore for every service on production. Found and fixed 5 bugs. Restructured `init.sh` into two-phase flow (IPv6 disable → reboot → Docker install + schedule backups + restore all services). Full DR is now a single script: `init.sh` → reboot → everything restored automatically (~8 min total). Monitoring-stack restore auto-installs InfluxDB/Grafana packages. Full end-to-end DR tested on fresh Ubuntu 24.04 VPS (5/5 services OK).
 
+**IP-Aware DR & Credential Management (Feb 2026):** Centralized all API tokens (Cloudflare, Gandi) into `/root/.credentials.env` with dedicated Borg backup (6th service: `credentials`). init.sh Phase 1 now recovers credentials from Borg, validates tokens via API, prompts for missing ones. Phase 2 detects IP changes and automatically rewrites NPM proxy configs, updates DNS A records + SPF via Cloudflare/Gandi APIs (production mode), waits for propagation, and updates TLSA records. Created `update-dns-ip.sh` for DNS migration. Removed hardcoded tokens from `update-tlsa-cloudflare.sh`. Only manual post-DR step is now PTR/rDNS request to hosting provider.
+
 ## Completed Phases ✅
 
 ### ✅ Phase 1: Foundation (COMPLETE)
@@ -92,7 +94,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **Key Features:**
 - Restore from latest or specific backup via CLI or TUI
-- `restore-all` command restores all 5 services in correct DR order
+- `restore-all` command restores all 6 services in correct DR order
 - CLI supports `--list`, `--archive`, `--yes` flags
 - Download from remote rsync server
 - Automatic service restart after restore
@@ -180,9 +182,9 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - `scripts/cleanup-backups.sh` - thin wrapper calling cli.py (refactored Feb 2026)
 
 **Key Features:**
-- Queue-based backup scheduling — pick one time window, all 5 services spaced automatically
+- Queue-based backup scheduling — pick one time window, all 6 services spaced automatically
 - Four time windows: Night (02:00), Morning (08:00), Afternoon (14:00), Evening (20:00)
-- All 5 services run daily, ordered fastest-first: nginx → mailcow-directory → mailcow → server-manager → monitoring-stack
+- All 6 services run daily, ordered fastest-first: credentials → nginx → mailcow-directory → mailcow → server-manager → monitoring-stack
 - Email notifications for success/failure
 - SMTP configuration via TUI
 - Automated cleanup with retention policies (CLI wired to MaintenanceManager)
@@ -254,7 +256,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **DR Testing & CLI Restore (February 2026):**
 - ✅ Added `restore` subcommand to `cli.py` (nginx, mailcow, mailcow-directory, server-manager, monitoring-stack)
-- ✅ Added `restore-all` subcommand for full DR (restores all 5 services in order: server-manager → nginx → mailcow-directory → mailcow → monitoring-stack)
+- ✅ Added `restore-all` subcommand for full DR (restores all 6 services in order: server-manager → nginx → mailcow-directory → mailcow → monitoring-stack)
 - ✅ Added `restore_server_manager()` method to restore.py
 - ✅ Fixed restore selecting oldest backup instead of latest (`backups[0]` → `backups[-1]` — borg list returns oldest-first)
 - ✅ Fixed mailcow-directory restore not restarting services (now runs `docker compose up -d` automatically)
@@ -277,7 +279,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
   - Round 1 (manual restore-all): Phase 1 → reboot → Phase 2 (Docker + cron) → `cli.py restore-all`: 5/5 OK in 5m20s
   - Round 2 (fully automated init.sh): Phase 1 → reboot → Phase 2 (Docker + cron + restore-all): 4/5 OK, monitoring-stack timed out
   - Found and fixed: `apt-get install` timeout too short for Grafana (300s → 600s), systemd oneshot default timeout too short (added `TimeoutStartSec=1800`), half-configured packages after timeout (added `dpkg --configure -a` recovery step)
-  - After fixes: monitoring-stack retry succeeded, all 5 services running
+  - After fixes: monitoring-stack retry succeeded, all 6 services running
   - All 20 Docker containers running (2 nginx, 18 mailcow)
   - All 3 systemd services active (influxdb, grafana-server, bridge timer)
 
@@ -301,7 +303,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - [x] Bootstrap script for fresh VPS (`init.sh` - two-phase: pre-reboot setup + post-reboot Docker install + full restore)
 - [x] DNS requirements documentation (init.sh now detects public IP and lists domains to update)
 - [x] Recovery runbook (init.sh summary section with CLI restore commands)
-- [x] CLI restore subcommand for all 5 services (`cli.py restore <service>`)
+- [x] CLI restore subcommand for all 6 services (`cli.py restore <service>`)
 - [x] Full DR restore command (`cli.py restore-all`) — single command to restore everything
 - [x] DR test of bootstrap.sh on production (Feb 17)
 - [x] DR test of all 5 service restores on production (Feb 18)
@@ -324,7 +326,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 | init.sh Phase 1 | ~2 min | Hostname, SSH keys, packages, server-manager, IPv6 disable |
 | Reboot | ~15 sec | Kernel reload with ipv6.disable=1 |
 | Phase 2: Docker install | ~10 sec | Docker CE + compose plugin |
-| Phase 2: Cron scheduling | ~1 sec | 5 backup jobs (night window) |
+| Phase 2: Cron scheduling | ~1 sec | 6 backup jobs (night window) |
 | Phase 2: restore server-manager | ~2.5 sec | Config files from Borg |
 | Phase 2: restore nginx | ~29 sec | NPM containers + database |
 | Phase 2: restore mailcow-directory | ~84 sec | Config, certs, docker compose up (image pulls) |
@@ -332,8 +334,9 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 | Phase 2: restore monitoring-stack | ~5-7 min | Package install (InfluxDB + Grafana ~200MB) + data restore |
 | **Total (fresh VPS to fully operational)** | **~12-15 min** | All 20 Docker containers + 3 systemd services running |
 
-Phase 1 is interactive (hostname + email prompts). Everything after reboot is fully automated.
-Only manual step after init.sh completes: update DNS A records to point to the new server IP.
+Phase 1 is interactive (hostname, DR mode, API tokens, email prompts). Everything after reboot is fully automated.
+Phase 2 now includes IP reconciliation: NPM proxy config rewrite, DNS A/SPF updates (production mode), TLSA update after propagation.
+Only manual step after init.sh completes: request PTR/rDNS from hosting provider for the new IP.
 
 ---
 
@@ -427,8 +430,8 @@ Only manual step after init.sh completes: update DNS A records to point to the n
 
 | Category | Features | Complete | Remaining |
 |----------|----------|----------|-----------|
-| **Backup** | 7 | 7 (100%) | 0 (nginx, mailcow, mailcow-dir, server-mgr, monitoring-stack, verification, auto-init) |
-| **Restore** | 6 | 6 (100%) | 0 (nginx, mailcow, mailcow-dir, server-mgr, monitoring-stack, CLI restore) |
+| **Backup** | 8 | 8 (100%) | 0 (credentials, nginx, mailcow, mailcow-dir, server-mgr, monitoring-stack, verification, auto-init) |
+| **Restore** | 7 | 7 (100%) | 0 (credentials, nginx, mailcow, mailcow-dir, server-mgr, monitoring-stack, CLI restore) |
 | **Installation** | 4 | 4 (100%) | 0 |
 | **System Config** | 4 | 4 (100%) | 0 |
 | **Maintenance** | 5 | 5 (100%) | 0 |
@@ -437,7 +440,7 @@ Only manual step after init.sh completes: update DNS A records to point to the n
 | **Settings** | 1 | 1 (100%) | 0 |
 | **DR** | 6 | 6 (100%) | 0 |
 | **Testing** | 10 | 0 (0%) | 10 (Full phase) |
-| **TOTAL** | 53 | 46 (87%) | 7 (13%) |
+| **TOTAL** | 55 | 48 (87%) | 7 (13%) |
 
 ## Production Readiness Assessment
 
@@ -466,7 +469,7 @@ Only manual step after init.sh completes: update DNS A records to point to the n
 
 ### Short-Term
 
-1. **~~Full End-to-End DR Test~~** ✅ DONE (Feb 18 — fresh VPS, all 5 services, ~8 min total)
+1. **~~Full End-to-End DR Test~~** ✅ DONE (Feb 18 — fresh VPS, all 6 services, ~8 min total)
 
 2. **User Documentation**
    - Update README.md with CLI restore usage
@@ -495,7 +498,7 @@ Only manual step after init.sh completes: update DNS A records to point to the n
 
 | Risk | Likelihood | Impact | Mitigation Status |
 |------|------------|--------|-------------------|
-| **Untested disaster recovery** | LOW | HIGH | ✅ TESTED (all 5 services restored on production, Feb 2026) |
+| **Untested disaster recovery** | LOW | HIGH | ✅ TESTED (all 6 services restored on production, Feb 2026) |
 | **Missing documentation** | MEDIUM | MEDIUM | ⚠️ IN PROGRESS |
 | **Backup corruption** | LOW | HIGH | ✅ MITIGATED (verification) |
 | **Rsync server failure** | MEDIUM | HIGH | ⚠️ NEEDS SECONDARY |
@@ -507,8 +510,8 @@ Only manual step after init.sh completes: update DNS A records to point to the n
 ### What's Working ✅
 
 The Server Manager has **successfully implemented the core functionality** with:
-- ✅ Complete backup system for all services (nginx, mailcow, mailcow-directory, server-manager, monitoring-stack)
-- ✅ Complete restore system — all 5 services tested and verified on production (Feb 2026)
+- ✅ Complete backup system for all services (credentials, nginx, mailcow, mailcow-directory, server-manager, monitoring-stack)
+- ✅ Complete restore system — all 6 services tested and verified on production (Feb 2026)
 - ✅ CLI restore subcommand (`cli.py restore <service>`) with `--list`, `--archive`, `--yes` flags
 - ✅ Automated installation and configuration
 - ✅ Maintenance and monitoring capabilities
@@ -532,8 +535,8 @@ The remaining gaps are minor:
 **Current Status: PRODUCTION READY**
 
 The application is **ready for production use** with:
-- ✅ Daily automated backups for all 5 services
-- ✅ Tested restore for all 5 services
+- ✅ Daily automated backups for all 6 services
+- ✅ Tested restore for all 6 services
 - ✅ Service management and monitoring
 - ✅ System configuration
 - ✅ CLI and TUI restore paths
@@ -548,5 +551,5 @@ The application is **ready for production use** with:
 **Production Ready:** ✅ **YES**
 **Recommended Next Step:** User documentation and unit tests (Phase 8)
 
-**Last Updated:** 2026-02-18
+**Last Updated:** 2026-02-21
 **Version:** 1.2

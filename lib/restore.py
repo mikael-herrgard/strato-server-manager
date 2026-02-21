@@ -750,6 +750,126 @@ class RestoreManager:
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
 
+    def restore_credentials(self, backup_name: str = "latest") -> bool:
+        """
+        Restore centralized credentials files from backup
+
+        Restores /root/.credentials.env and /root/.dns-config, sets permissions,
+        and syncs certbot credential files.
+
+        Args:
+            backup_name: Backup name to restore ("latest" for most recent)
+
+        Returns:
+            True if successful
+        """
+        logger.info(f"Starting credentials restore (backup: {backup_name})")
+
+        repo = self._get_borg_repo('credentials')
+
+        # Get backup list
+        backups = self.list_remote_backups('credentials')
+        if not backups:
+            logger.error("No credentials backups found")
+            return False
+
+        # Select backup
+        if backup_name == "latest":
+            selected_backup = backups[-1]['name']
+            logger.info(f"Using latest backup: {selected_backup}")
+        else:
+            selected_backup = backup_name
+
+        # Check disk space
+        if not check_disk_space(self.local_staging, 1):
+            logger.error("Insufficient disk space for restore")
+            return False
+
+        # Create temporary extraction directory
+        temp_dir = os.path.join(
+            self.local_staging,
+            f'restore-credentials-{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+        )
+        ensure_directory(temp_dir)
+
+        try:
+            # Extract backup
+            if not self._extract_backup(repo, selected_backup, temp_dir):
+                return False
+
+            # Restore each credentials file
+            restored = 0
+            for filename in ['.credentials.env', '.dns-config']:
+                extracted_path = os.path.join(temp_dir, 'root', filename)
+                target_path = f'/root/{filename}'
+
+                if os.path.exists(extracted_path):
+                    # Backup existing file if present
+                    if os.path.exists(target_path):
+                        import shutil
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        shutil.copy2(target_path, f"{target_path}.pre-restore.{timestamp}")
+
+                    import shutil
+                    shutil.copy2(extracted_path, target_path)
+                    os.chmod(target_path, 0o600)
+                    logger.info(f"Restored: {target_path}")
+                    restored += 1
+                else:
+                    logger.warning(f"File not found in backup: {filename}")
+
+            # Sync certbot credentials from restored .credentials.env
+            if os.path.exists('/root/.credentials.env'):
+                self._sync_certbot_credentials()
+
+            logger.info(f"Credentials restore completed -- {restored} file(s) restored")
+            return True
+
+        except Exception as e:
+            logger.error(f"Credentials restore failed: {e}", exc_info=True)
+            return False
+        finally:
+            # Cleanup temp directory
+            if os.path.exists(temp_dir):
+                import shutil
+                shutil.rmtree(temp_dir)
+
+    def _sync_certbot_credentials(self):
+        """Sync certbot credential files from centralized .credentials.env"""
+        try:
+            # Read credentials
+            credentials = {}
+            with open('/root/.credentials.env', 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, _, value = line.partition('=')
+                        credentials[key.strip()] = value.strip().strip('"')
+
+            cred_dir = '/root/nginx/letsencrypt/credentials'
+            ensure_directory(cred_dir)
+
+            # Cloudflare credentials
+            cf_token = credentials.get('CF_API_TOKEN', '')
+            if cf_token:
+                cf_path = os.path.join(cred_dir, 'credentials-2')
+                with open(cf_path, 'w') as f:
+                    f.write(f"dns_cloudflare_api_token={cf_token}\n")
+                os.chmod(cf_path, 0o600)
+                logger.info("Synced Cloudflare certbot credentials")
+
+            # Gandi credentials
+            gandi_token = credentials.get('GANDI_TOKEN', '')
+            if gandi_token:
+                gandi_path = os.path.join(cred_dir, 'credentials-gandi')
+                with open(gandi_path, 'w') as f:
+                    f.write(f"dns_gandi_token={gandi_token}\n")
+                os.chmod(gandi_path, 0o600)
+                logger.info("Synced Gandi certbot credentials")
+
+        except Exception as e:
+            logger.warning(f"Failed to sync certbot credentials: {e}")
+
     def _install_monitoring_packages(self) -> bool:
         """
         Install InfluxDB and Grafana packages if not already present.

@@ -16,6 +16,7 @@ class SchedulingManager:
     """Manages automated task scheduling"""
 
     BACKUP_QUEUE = [
+        {'service': 'credentials',       'frequency': 'daily',  'offset_minutes': -5},
         {'service': 'nginx',             'frequency': 'daily',  'offset_minutes': 0},
         {'service': 'mailcow-directory', 'frequency': 'daily',  'offset_minutes': 30},
         {'service': 'mailcow',           'frequency': 'daily',  'offset_minutes': 60},

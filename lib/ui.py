@@ -79,10 +79,11 @@ class ServerManagerUI:
             ("3", "Backup Mailcow Directory"),
             ("4", "Backup Monitoring Stack"),
             ("5", "Backup Server-Manager Config"),
-            ("6", "Backup All Services"),
-            ("7", "View Backup Status"),
-            ("8", "Initialize Backup Repositories"),
-            ("9", "Configure Backup Schedule"),
+            ("6", "Backup Credentials"),
+            ("7", "Backup All Services"),
+            ("8", "View Backup Status"),
+            ("9", "Initialize Backup Repositories"),
+            ("A", "Configure Backup Schedule"),
             ("0", "Back to Main Menu")
         ]
 
@@ -112,7 +113,8 @@ class ServerManagerUI:
             ("2", "Restore Mailcow Directory"),
             ("3", "Restore Mailcow Data"),
             ("4", "Restore Monitoring Stack"),
-            ("5", "List Available Backups"),
+            ("5", "Restore Credentials"),
+            ("6", "List Available Backups"),
             ("0", "Back to Main Menu")
         ]
 

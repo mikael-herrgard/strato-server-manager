@@ -68,7 +68,7 @@ class BackupManager:
         return f"ssh://{rsync_host}/./{base_path}/{service}-backup"
 
     # All known service names that have Borg repositories
-    BACKUP_SERVICES = ['nginx', 'mailcow', 'mailcow-directory', 'server-manager', 'monitoring-stack']
+    BACKUP_SERVICES = ['nginx', 'mailcow', 'mailcow-directory', 'server-manager', 'monitoring-stack', 'credentials']
 
     def _ensure_borg_repo(self, repo: str) -> bool:
         """
@@ -753,6 +753,59 @@ class BackupManager:
             if restart_failures:
                 logger.error(f"CRITICAL: Failed to restart services: {', '.join(restart_failures)}")
                 logger.error("Manual intervention required — run: systemctl start " + " ".join(restart_failures))
+
+    def backup_credentials(self, verify: bool = True) -> bool:
+        """
+        Backup centralized credentials files
+
+        Backs up /root/.credentials.env and /root/.dns-config to a dedicated
+        Borg repository. These are tiny files (~1KB) so the backup is very fast.
+
+        Args:
+            verify: Verify backup after creation
+
+        Returns:
+            True if successful
+        """
+        logger.info("Starting credentials backup")
+
+        repo = self._get_borg_repo('credentials')
+
+        # Pre-backup checks (minimal disk space needed)
+        if not self._pre_backup_checks('credentials', required_gb=1):
+            return False
+
+        # Collect source paths
+        source_paths = []
+        for path in ['/root/.credentials.env', '/root/.dns-config']:
+            if os.path.exists(path):
+                source_paths.append(path)
+            else:
+                logger.warning(f"Credentials file not found: {path}")
+
+        if not source_paths:
+            logger.error("No credentials files found to back up")
+            return False
+
+        # Create archive name with timestamp
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        archive_name = f"{self.hostname}-credentials-{timestamp}"
+
+        # Create backup
+        if not self._create_borg_backup(repo, archive_name, source_paths):
+            return False
+
+        # Verify backup
+        if verify:
+            if not self.verify_backup(repo, archive_name):
+                logger.error("Backup verification failed")
+                return False
+
+        # Prune old backups
+        self.prune_old_backups(repo)
+
+        logger.info("Credentials backup completed successfully")
+        return True
 
     def get_backup_status(self) -> Dict[str, any]:
         """

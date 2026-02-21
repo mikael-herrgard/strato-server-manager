@@ -221,15 +221,49 @@ class BackupHandlers:
             logger.error(f"Monitoring stack backup error: {e}")
             self.ui.show_error(f"Backup failed:\n\n{e}")
 
+    def handle_backup_credentials(self):
+        """Backup centralized credentials"""
+        if not self.ui.confirm_action(
+            "This will create a backup of centralized credentials.\n\n"
+            "The backup includes:\n"
+            "  • /root/.credentials.env (API tokens)\n"
+            "  • /root/.dns-config (domain-to-provider mapping)\n\n"
+            "The backup will be stored on your rsync server.\n\n"
+            "Continue?",
+            "Backup Credentials"
+        ):
+            return
+
+        try:
+            backup_mgr = self._get_backup_manager()
+
+            self.ui.show_infobox("Creating credentials backup...\n\nThis should be very fast.")
+
+            success = backup_mgr.backup_credentials(verify=True)
+
+            if success:
+                self.ui.show_success(
+                    "Credentials backup completed successfully!\n\n"
+                    "The backup has been stored on your rsync server and verified."
+                )
+                logger.info("Credentials backup completed via TUI")
+            else:
+                self.ui.show_error("Credentials backup failed. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Credentials backup error: {e}")
+            self.ui.show_error(f"Backup failed:\n\n{e}")
+
     def handle_backup_all(self):
         """Backup all services in sequence"""
         if not self.ui.confirm_action(
             "This will backup ALL services in sequence:\n\n"
-            "  1. nginx Proxy Manager\n"
-            "  2. Mailcow Directory\n"
-            "  3. Mailcow Data (complete)\n"
-            "  4. Monitoring Stack\n"
-            "  5. Server-Manager Config\n\n"
+            "  1. Credentials\n"
+            "  2. nginx Proxy Manager\n"
+            "  3. Mailcow Directory\n"
+            "  4. Mailcow Data (complete)\n"
+            "  5. Monitoring Stack\n"
+            "  6. Server-Manager Config\n\n"
             "This may take 30-90 minutes depending on data volume.\n\n"
             "Continue?",
             "Backup All Services"
@@ -241,24 +275,28 @@ class BackupHandlers:
 
             results = {}
 
-            # 1. nginx
-            self.ui.show_infobox("Backing up nginx Proxy Manager...\n\n(Step 1 of 5)")
+            # 1. Credentials
+            self.ui.show_infobox("Backing up Credentials...\n\n(Step 1 of 6)")
+            results['credentials'] = backup_mgr.backup_credentials(verify=True)
+
+            # 2. nginx
+            self.ui.show_infobox("Backing up nginx Proxy Manager...\n\n(Step 2 of 6)")
             results['nginx'] = backup_mgr.backup_nginx(verify=True)
 
-            # 2. Mailcow Directory
-            self.ui.show_infobox("Backing up Mailcow Directory...\n\n(Step 2 of 5)")
+            # 3. Mailcow Directory
+            self.ui.show_infobox("Backing up Mailcow Directory...\n\n(Step 3 of 6)")
             results['mailcow-directory'] = backup_mgr.backup_mailcow_directory(verify=True)
 
-            # 3. Mailcow Data
-            self.ui.show_infobox("Backing up Mailcow Data...\n\n(Step 3 of 5)\nThis may take a while...")
+            # 4. Mailcow Data
+            self.ui.show_infobox("Backing up Mailcow Data...\n\n(Step 4 of 6)\nThis may take a while...")
             results['mailcow'] = backup_mgr.backup_mailcow(backup_type='all', verify=True)
 
-            # 4. Monitoring Stack
-            self.ui.show_infobox("Backing up Monitoring Stack...\n\n(Step 4 of 5)")
+            # 5. Monitoring Stack
+            self.ui.show_infobox("Backing up Monitoring Stack...\n\n(Step 5 of 6)")
             results['monitoring-stack'] = backup_mgr.backup_monitoring_stack(verify=True)
 
-            # 5. Server-Manager
-            self.ui.show_infobox("Backing up Server-Manager Config...\n\n(Step 5 of 5)")
+            # 6. Server-Manager
+            self.ui.show_infobox("Backing up Server-Manager Config...\n\n(Step 6 of 6)")
             results['server-manager'] = backup_mgr.backup_server_manager(verify=True)
 
             # Build summary
@@ -322,7 +360,8 @@ class BackupHandlers:
             "  • mailcow-backup\n"
             "  • mailcow-directory-backup\n"
             "  • server-manager-backup\n"
-            "  • monitoring-stack-backup\n\n"
+            "  • monitoring-stack-backup\n"
+            "  • credentials-backup\n\n"
             "Existing repositories will be left untouched.\n"
             "Missing repositories will be created.\n\n"
             "This is useful when setting up a new backup provider.\n\n"
