@@ -18,6 +18,8 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **IP-Aware DR & Credential Management (Feb 2026):** Centralized all API tokens (Cloudflare, Gandi) into `/root/.credentials.env` with dedicated Borg backup (6th service: `credentials`). init.sh Phase 1 now recovers credentials from Borg, validates tokens via API, prompts for missing ones. Phase 2 detects IP changes and automatically rewrites NPM proxy configs, updates DNS A records + SPF via Cloudflare/Gandi APIs (production mode), waits for propagation, and updates TLSA records. Created `update-dns-ip.sh` for DNS migration. Removed hardcoded tokens from `update-tlsa-cloudflare.sh`. Only manual post-DR step is now PTR/rDNS request to hosting provider.
 
+**Gandi Token Auto-Renewal (Feb 2026):** Created `gandi-token-renew.sh` for automated Gandi PAT renewal. Checks expiry daily at 12:00 via `GET /tokeninfo`; when <=30 days remaining, renews via `POST /v5/organization/access-tokens`. Atomically updates `.credentials.env` (with `.previous` backup and rollback on verification failure), syncs certbot `credentials-gandi` file. Tiered notifications: INFO on success, WARNING on failure with >7 days left, ERROR when <=7 days. Added `schedule_gandi_token_renewal()` to scheduling.py and integrated into init.sh Phase 2. Seeded `credentials-gandi` certbot credential file for Gandi DNS challenges.
+
 ## Completed Phases ✅
 
 ### ✅ Phase 1: Foundation (COMPLETE)
@@ -402,7 +404,7 @@ Only manual step after init.sh completes: request PTR/rDNS from hosting provider
 | **Core Modules** | 9 files |
 | **Handler Modules** | 7 files (incl. `__init__.py`) |
 | **CLI Entry Point** | 1 file (cli.py - 145 lines) |
-| **Shell Scripts** | 5 files (~1,050 lines total incl. bootstrap) |
+| **Shell Scripts** | 6 files (~1,200 lines total incl. bootstrap) |
 | **Configuration Files** | 2 files (settings.yaml, notifications.yaml) |
 | **Main Application** | 511 lines |
 
@@ -422,7 +424,7 @@ Only manual step after init.sh completes: request PTR/rDNS from hosting provider
 | `lib/config.py` | 320 | Config management |
 | `lib/utils.py` | 486 | Utilities (incl. systemd helpers) |
 | **Handler Files** | ~2,055 | Menu operations (7 files) |
-| **Scripts** | ~570 | Shell scripts (3 in scripts/) |
+| **Scripts** | ~720 | Shell scripts (4 in scripts/) |
 | **Bootstrap** | ~485 | Bootstrap/install scripts |
 | **Main App** | 511 | TUI entry point |
 

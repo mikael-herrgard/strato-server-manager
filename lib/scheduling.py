@@ -133,7 +133,9 @@ class SchedulingManager:
         if match:
             return f'backup_{match.group(1)}'
 
-        if 'cleanup' in command:
+        if 'gandi-token-renew' in command:
+            return 'gandi_token_renew'
+        elif 'cleanup' in command:
             return 'cleanup'
         elif 'update' in command:
             return 'update'
@@ -473,6 +475,45 @@ class SchedulingManager:
 
         except Exception as e:
             logger.error(f"Failed to schedule cleanup: {e}")
+            return False
+
+    def schedule_gandi_token_renewal(self) -> bool:
+        """
+        Schedule daily Gandi token renewal check at 12:00.
+
+        Replaces any existing gandi_token_renew cron job.
+
+        Returns:
+            True if scheduled successfully
+        """
+        try:
+            script_path = "/opt/server-manager/scripts/gandi-token-renew.sh"
+            log_file = "/var/log/gandi-token-renew.log"
+            lock_file = "/tmp/gandi-token-renew.lock"
+
+            cmd = f"flock -n {lock_file} {script_path} >> {log_file} 2>&1"
+
+            current = self.get_current_schedule()
+            jobs = [j for j in current.get('jobs', []) if j['type'] != 'gandi_token_renew']
+
+            jobs.append({
+                'minute': '0',
+                'hour': '12',
+                'day': '*',
+                'month': '*',
+                'weekday': '*',
+                'command': cmd,
+                'schedule': '0 12 * * *',
+                'type': 'gandi_token_renew'
+            })
+
+            self._write_crontab(jobs)
+
+            logger.info("Scheduled Gandi token renewal: daily at 12:00")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to schedule Gandi token renewal: {e}")
             return False
 
     def get_next_run_time(self, schedule: str) -> Optional[str]:
