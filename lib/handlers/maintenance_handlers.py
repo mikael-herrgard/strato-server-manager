@@ -352,7 +352,7 @@ class MaintenanceHandlers:
             "  3. Activate Gandi LiveDNS nameservers\n"
             "  4. Enable DNSSEC\n"
             "  5. Verify records\n\n"
-            "This will create ~17 DNS records and enable DNSSEC.\n\n"
+            "This will create ~18 DNS records and enable DNSSEC.\n\n"
             "Continue?",
             f"Setup Gandi Domain: {domain}"
         ):
@@ -386,12 +386,20 @@ class MaintenanceHandlers:
                 self.ui.show_info(
                     f"Domain {domain} has been set up at Gandi!\n\n"
                     "Manual steps remaining:\n\n"
-                    f"  1. NPM: Request SSL cert for {domain}, mta-sts.{domain}\n"
-                    "     (DNS challenge with Gandi credentials)\n\n"
-                    f"  2. NPM: Create proxy hosts for {domain}\n"
-                    f"     and mta-sts.{domain}\n\n"
-                    "  3. Wait for DNS propagation (up to 48h)\n\n"
-                    "  4. Test email delivery",
+                    f"  1. NPM: SSL cert for {domain}, mta-sts.{domain},\n"
+                    f"     mail.{domain} (DNS challenge, Gandi creds)\n\n"
+                    "  2. NPM: Proxy hosts -> https://194.164.197.33:4433\n"
+                    f"     - {domain}\n"
+                    f"     - mta-sts.{domain}\n"
+                    f"     - mail.{domain}\n"
+                    "     (Force SSL, HSTS, Block Exploits on all)\n\n"
+                    "  3. NPM: Advanced tab on each host, add:\n"
+                    '     add_header Strict-Transport-Security\n'
+                    '     "max-age=31536000; includeSubDomains;\n'
+                    '     preload" always;\n\n'
+                    "  4. Wait for DNS propagation (up to 48h)\n\n"
+                    f"  5. Test: https://internet.nl/mail/{domain}/\n\n"
+                    "  6. Test email delivery",
                     f"Setup Complete: {domain}"
                 )
                 logger.info(f"Gandi domain setup completed via TUI: {domain}")

@@ -283,6 +283,9 @@ do_record() {
 # A record: @ -> server IP
 do_record "@" "A" "$TTL" "[\"$SERVER_IP\"]"
 
+# A record: mail -> server IP (per-domain webmail)
+do_record "mail" "A" "$TTL" "[\"$SERVER_IP\"]"
+
 # MX record: @ -> mail.villaherrgard.com. priority 10
 do_record "@" "MX" "$TTL" "[\"10 $MAIL_HOST.\"]"
 
@@ -543,14 +546,19 @@ fi
 
 log ""
 log "--- Manual Steps Remaining ---"
-info "1. In Nginx Proxy Manager:"
-info "   - Request SSL certificate for $DOMAIN, mta-sts.$DOMAIN"
-info "     (Use DNS challenge with Gandi credentials)"
-info "2. In Nginx Proxy Manager:"
-info "   - Create proxy host: $DOMAIN -> http://127.0.0.1:8080 (or desired backend)"
-info "   - Create proxy host: mta-sts.$DOMAIN -> Mailcow MTA-STS"
-info "3. Wait for DNS propagation (up to 48h for full global propagation)"
-info "4. Test email delivery: send test emails to/from $DOMAIN"
+info "1. NPM - SSL certificate:"
+info "   - Request cert for: $DOMAIN, mta-sts.$DOMAIN, mail.$DOMAIN"
+info "     (DNS challenge with Gandi credentials)"
+info "2. NPM - Proxy hosts (all -> https://194.164.197.33:4433):"
+info "   - $DOMAIN (Force SSL, HSTS, Block Exploits)"
+info "   - mta-sts.$DOMAIN (Force SSL, HSTS, Block Exploits)"
+info "   - mail.$DOMAIN (Force SSL, HSTS, Block Exploits)"
+info "3. NPM - Advanced tab on each proxy host, add:"
+info "   add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains; preload\" always;"
+info "   (Required to pass internet.nl HSTS test)"
+info "4. Wait for DNS propagation (up to 48h)"
+info "5. Test: https://internet.nl/mail/$DOMAIN/"
+info "6. Test email delivery: send test emails to/from $DOMAIN"
 
 if [ $RECORDS_FAILED -gt 0 ]; then
     exit 1
