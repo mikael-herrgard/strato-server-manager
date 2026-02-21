@@ -294,6 +294,8 @@ For help, see: /opt/server-manager/README.md
                 self.maintenance_handlers.handle_cleanup_backups()
             elif choice == "5":
                 self.maintenance_handlers.handle_cleanup_docker()
+            elif choice == "6":
+                self.maintenance_handlers.handle_setup_gandi_domain()
             elif choice == "0" or choice == "back":
                 break
 

@@ -173,6 +173,7 @@ class ServerManagerUI:
             ("3", "Update System Packages"),
             ("4", "Cleanup Old Backups"),
             ("5", "Cleanup Docker"),
+            ("6", "Setup Gandi Domain"),
             ("0", "Back to Main Menu")
         ]
 

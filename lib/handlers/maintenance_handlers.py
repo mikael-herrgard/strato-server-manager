@@ -3,7 +3,7 @@ Maintenance Menu Handlers
 Handles all maintenance-related menu operations
 """
 
-from ..utils import logger
+from ..utils import logger, run_command
 
 
 class MaintenanceHandlers:
@@ -328,3 +328,80 @@ class MaintenanceHandlers:
         except Exception as e:
             logger.error(f"Backup cleanup error: {e}")
             self.ui.show_error(f"Cleanup failed:\n\n{e}")
+
+    def handle_setup_gandi_domain(self):
+        """Setup DNS zone for a Gandi domain"""
+        # Get domain name from user
+        domain = self.ui.input_text(
+            "Enter the domain name to set up at Gandi:\n\n"
+            "The domain must already be transferred to Gandi\n"
+            "and added to Mailcow with DKIM keys generated.",
+            "Setup Gandi Domain"
+        )
+
+        if not domain:
+            return
+
+        domain = domain.strip().lower()
+
+        if not self.ui.confirm_action(
+            f"This will set up the complete DNS zone for {domain} at Gandi.\n\n"
+            "The setup process:\n"
+            "  1. Verify prerequisites (Gandi, Mailcow, DKIM)\n"
+            "  2. Create all DNS records (MX, SPF, DKIM, DMARC, etc.)\n"
+            "  3. Activate Gandi LiveDNS nameservers\n"
+            "  4. Enable DNSSEC\n"
+            "  5. Verify records\n\n"
+            "This will create ~17 DNS records and enable DNSSEC.\n\n"
+            "Continue?",
+            f"Setup Gandi Domain: {domain}"
+        ):
+            return
+
+        try:
+            self.ui.show_infobox(
+                f"Setting up Gandi domain: {domain}\n\n"
+                "This may take 30-60 seconds.\n"
+                "Please wait..."
+            )
+
+            script = "/opt/server-manager/scripts/setup-gandi-domain.sh"
+            returncode, stdout, stderr = run_command(
+                ["bash", script, domain],
+                check=False,
+                timeout=120
+            )
+
+            # Combine output
+            output = stdout
+            if stderr:
+                output += "\n--- stderr ---\n" + stderr
+
+            if returncode == 0:
+                self.ui.show_scrollable_text(
+                    output,
+                    f"Gandi Domain Setup: {domain} - Complete"
+                )
+
+                self.ui.show_info(
+                    f"Domain {domain} has been set up at Gandi!\n\n"
+                    "Manual steps remaining:\n\n"
+                    f"  1. NPM: Request SSL cert for {domain}, mta-sts.{domain}\n"
+                    "     (DNS challenge with Gandi credentials)\n\n"
+                    f"  2. NPM: Create proxy hosts for {domain}\n"
+                    f"     and mta-sts.{domain}\n\n"
+                    "  3. Wait for DNS propagation (up to 48h)\n\n"
+                    "  4. Test email delivery",
+                    f"Setup Complete: {domain}"
+                )
+                logger.info(f"Gandi domain setup completed via TUI: {domain}")
+            else:
+                self.ui.show_scrollable_text(
+                    output,
+                    f"Gandi Domain Setup: {domain} - Failed"
+                )
+                logger.error(f"Gandi domain setup failed via TUI: {domain}")
+
+        except Exception as e:
+            logger.error(f"Gandi domain setup error: {e}")
+            self.ui.show_error(f"Domain setup failed:\n\n{e}")
