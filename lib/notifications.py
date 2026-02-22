@@ -77,6 +77,7 @@ class NotificationManager:
             import yaml
             with open(config_file, 'w') as f:
                 yaml.dump({'notifications': config}, f, default_flow_style=False)
+            os.chmod(config_file, 0o600)
 
             self.notification_config = config
             logger.info("Notification config saved")
