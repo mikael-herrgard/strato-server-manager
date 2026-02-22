@@ -1,5 +1,9 @@
 # Gandi DNS Migration Report: Automated vs Manual Approach
 
+> **SUPERSEDED (2026-02-22):** The issues documented in this report have been fully resolved.
+> The automated setup script (`scripts/setup-gandi-domain.sh`) handles everything end-to-end.
+> See `GANDI-MIGRATION-QUICK-REFERENCE.md` for the current workflow.
+
 **Date:** 2026-02-13
 **Domain:** keken.nu
 **Objective:** Migrate DNS from deSEC to Gandi LiveDNS with DNSSEC

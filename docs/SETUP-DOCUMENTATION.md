@@ -358,35 +358,71 @@ ports:
 7. **HTTP/2 Support:** ✅ Enabled
 8. **HSTS Enabled:** ✅ Enabled
 
-**Custom Nginx Configuration (Advanced tab):**
+**Custom Nginx Configuration (Advanced tab) for all Mailcow proxy hosts:**
 ```nginx
-# Forward real client IP to mailcow
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-proxy_set_header X-Forwarded-Proto $scheme;
-proxy_set_header X-Real-IP $remote_addr;
+# Strip Mailcow's headers and set correct ones
+proxy_hide_header Strict-Transport-Security;
+proxy_hide_header Referrer-Policy;
+
+add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+more_set_headers "Referrer-Policy: same-origin";
+more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'self'; form-action 'self'; base-uri 'self';";
 ```
 
-### 5.3 MTA-STS Proxy Host
+**Why these headers are needed:**
+- Mailcow's nginx sends `Strict-Transport-Security: max-age=15768000` (6 months) and
+  `Referrer-Policy: strict-origin` — both fail internet.nl tests
+- `proxy_hide_header` strips Mailcow's headers; the replacement headers are set by NPM
+- `more_set_headers` (from headers-more module) is used for CSP and Referrer-Policy
+  because nginx's `add_header` in server context is overridden by NPM's location block
+- CSP requires `unsafe-inline`/`unsafe-eval` because Mailcow's SOGo/admin UI needs them
 
-**Special Configuration for mta-sts.villaherrgard.com:**
+### 5.3 Mailcow Proxy Hosts
 
-Create a proxy host with:
-- **Domain:** `mta-sts.villaherrgard.com`
-- **Forward Port:** `4433` (NOT 4443)
-- **SSL Certificate:** Combined certificate
-- Enable all standard security settings
+All domains served through Mailcow need three proxy hosts each, all forwarding
+to `https://194.164.197.33:4433`:
 
-The policy is dynamically served by mailcow at:
+| Proxy Host | Purpose |
+|-----------|---------|
+| `{domain}` | Domain root |
+| `mta-sts.{domain}` | MTA-STS policy (served by Mailcow at `/.well-known/mta-sts.txt`) |
+| `mail.{domain}` | Per-domain webmail access |
+
+Each host uses the same SSL certificate, security settings, and Advanced tab snippet above.
+
+### 5.4 Current Proxy Hosts
+
+| Host | Target Port | Certificate | Purpose |
+|------|------------|-------------|---------|
+| `mail.villaherrgard.com` | 4433 | npm-2 | Webmail |
+| `villaherrgard.com` | 4433 | npm-2 | Domain root |
+| `mta-sts.villaherrgard.com` | 4433 | npm-2 | MTA-STS |
+| `autoconfig.villaherrgard.com` | 4433 | npm-2 | Mail autoconfig |
+| `autodiscover.villaherrgard.com` | 4433 | npm-2 | Mail autodiscover |
+| `keken.nu` | 4433 | npm-6 | Domain root |
+| `mta-sts.keken.nu` | 4433 | npm-6 | MTA-STS |
+| `mail.keken.nu` | 4433 | npm-6 | Webmail |
+| `nginx.villaherrgard.com` | 81 | npm-2 | NPM admin |
+| `portainer.villaherrgard.com` | 9443 | npm-2 | Portainer |
+| `grafana.villaherrgard.com` | 3000 | npm-2 | Grafana |
+| `plex.villaherrgard.com` | 32400 | npm-2 | Plex |
+| `flow.villaherrgard.com` | 2002 | npm-2 | Flow |
+| `valheim.villaherrgard.com` | 5000 | npm-2 | Valheim |
+
+### 5.5 security.txt
+
+A shared `security.txt` is served by Mailcow for all domains:
+
+**File:** `/opt/mailcow-dockerized/data/web/.well-known/security.txt`
+
 ```
-https://mta-sts.villaherrgard.com/.well-known/mta-sts.txt
+Contact: mailto:postmaster@villaherrgard.com
+Expires: 2027-02-22T00:00:00.000Z
+Preferred-Languages: en, sv
 ```
 
-### 5.4 Root Domain Redirect
-
-For `villaherrgard.com` (root domain):
-- Create proxy host forwarding to mailcow or other service
-- Use the combined certificate
-- Configure as needed (redirect, proxy, etc.)
+This file is automatically served at `https://{domain}/.well-known/security.txt`
+for all domains proxied to Mailcow. Update the `Expires` date annually.
 
 ---
 

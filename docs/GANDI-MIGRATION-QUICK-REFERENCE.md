@@ -1,162 +1,174 @@
-# Gandi LiveDNS Migration - Quick Reference
+# Gandi Domain Setup - Quick Reference
 
-## Automated Workflow (Validated 2026-02-21)
+## Automated Setup Script
 
-The entire LiveDNS + DNSSEC setup is fully automatable via API. Zero manual steps.
+**Script:** `/opt/server-manager/scripts/setup-gandi-domain.sh`
+**TUI:** Server Manager → Maintenance → Setup Gandi Domain
+**Validated:** 2026-02-22 (tested on keken.nu — full delete + recreate cycle)
 
-### Step 1: Create LiveDNS zone and DNS records
+The script performs the complete domain setup in one run: prerequisite checks,
+18 DNS records, LiveDNS activation, DNSSEC enablement, and verification.
+
+### Usage
+
 ```bash
-# Create zone
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  "https://api.gandi.net/v5/livedns/domains/$DOMAIN"
+# From command line
+bash /opt/server-manager/scripts/setup-gandi-domain.sh <domain>
 
-# Add records (repeat for each record)
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  "https://api.gandi.net/v5/livedns/domains/$DOMAIN/records" \
-  -d '{"rrset_name": "@", "rrset_type": "MX", "rrset_ttl": 3600, "rrset_values": ["10 mail.villaherrgard.com."]}'
+# From TUI
+server_manager.py → Maintenance → Setup Gandi Domain
 ```
 
-### Step 2: Activate LiveDNS
-```bash
-# Set Gandi nameservers -- this activates the gandilivedns service
-# DNS records are preserved (NOT wiped like the admin panel method)
-curl -X PUT -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  "https://api.gandi.net/v5/domain/domains/$DOMAIN/nameservers" \
-  -d '{"nameservers": ["ns-64-a.gandi.net", "ns-90-b.gandi.net", "ns-58-c.gandi.net"]}'
-```
+### What It Does
 
-### Step 3: Enable DNSSEC
-```bash
-# Create DNSSEC key at LiveDNS level (starts zone signing)
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  "https://api.gandi.net/v5/livedns/domains/$DOMAIN/keys" \
-  -d '{"flags": 257}'
+1. **Prerequisite checks** (all must pass before any changes):
+   - `/root/.credentials.env` exists with valid `GANDI_TOKEN`
+   - Gandi API token validates (tokeninfo endpoint, falls back to domain list)
+   - Domain exists at Gandi (transfer must be complete)
+   - Domain exists in Mailcow (MySQL check)
+   - DKIM public key exists in Mailcow Redis
+   - `mail.villaherrgard.com` resolves to an IP
+   - Required tools: `jq`, `dig`, `curl`, `docker`
 
-# Extract public key from Gandi authoritative nameserver (available immediately)
-PUBKEY=$(dig @ns-64-a.gandi.net DNSKEY $DOMAIN +short | grep "^257" | awk '{print $4$5}')
+2. **Creates 18 DNS records** via Gandi LiveDNS PUT API:
+   - `@` A → server IP
+   - `mail` A → server IP (per-domain webmail)
+   - `@` MX → `mail.villaherrgard.com.` priority 10
+   - `@` TXT (SPF) → `v=spf1 mx a:mail.villaherrgard.com ip4:{IP} -all`
+   - `dkim._domainkey` TXT (DKIM) → public key from Mailcow Redis
+   - `_dmarc` TXT (DMARC) → `v=DMARC1; p=quarantine; ...`
+   - `mta-sts` A → server IP
+   - `_mta-sts` TXT → `v=STSv1; id={YYYYMMDD}0001`
+   - `_smtp._tls` TXT (TLS-RPT) → `v=TLSRPTv1; rua=mailto:postmaster@{domain}`
+   - `autoconfig` CNAME → `mail.villaherrgard.com.`
+   - `autodiscover` CNAME → `mail.villaherrgard.com.`
+   - 6 SRV records (autodiscover, imap, imaps, pop3, pop3s, submission)
+   - `@` CAA (issue, issuewild, iodef for letsencrypt.org)
 
-# Publish DS record to TLD registry
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  "https://api.gandi.net/v5/domain/domains/$DOMAIN/dnskeys" \
-  -d "{\"algorithm\": 13, \"type\": \"ksk\", \"public_key\": \"$PUBKEY\"}"
-```
+3. **Activates Gandi LiveDNS** nameservers (ns-64-a, ns-90-b, ns-58-c)
+
+4. **Enables DNSSEC**: creates signing key, waits for propagation, publishes DS record
+
+5. **Verifies** MX, SPF, DKIM, DMARC via dig against Gandi nameservers
 
 ---
 
-## What the Original Test Got Wrong (2026-02-13)
+## Manual Steps After Script
 
-### "Problem 1: Nameserver API doesn't activate LiveDNS" -- WRONG
+### NPM SSL Certificate
 
-The original test used non-standard Gandi nameservers (`ns-228-c.gandi.net`). Using the
-correct LiveDNS nameservers (`ns-64-a`, `ns-90-b`, `ns-58-c`) via PUT **does** activate
-the `gandilivedns` service. Additionally, DNS records are preserved -- unlike the admin
-panel "Use Gandi LiveDNS" button which wipes all records.
+Request a single certificate covering all three hostnames:
+- `{domain}`
+- `mta-sts.{domain}`
+- `mail.{domain}`
 
-### "Problem 2: DNSSEC key not published" -- WRONG
+Use **DNS challenge** with Gandi credentials.
 
-The original test queried recursive resolvers for the DNSKEY record and didn't find it.
-Querying Gandi's authoritative nameserver directly (`dig @ns-64-a.gandi.net DNSKEY domain`)
-returns the DNSKEY immediately after key creation. The public key can then be POSTed to
-the domain dnskeys API to publish the DS record.
+### NPM Proxy Hosts
+
+Create 3 proxy hosts, all forwarding to `https://194.164.197.33:4433` (Mailcow):
+
+| Proxy Host | Purpose |
+|-----------|---------|
+| `{domain}` | Domain root (Mailcow UI) |
+| `mta-sts.{domain}` | MTA-STS policy serving |
+| `mail.{domain}` | Per-domain webmail access |
+
+**Settings for all three:**
+- Scheme: `https`
+- Forward IP: `194.164.197.33`
+- Forward Port: `4433`
+- Force SSL: ✅
+- HTTP/2: ✅
+- HSTS: ✅
+- Block Exploits: ✅
+
+### NPM Advanced Tab (Required for internet.nl compliance)
+
+Paste this into the **Advanced** tab of each Mailcow proxy host:
+
+```nginx
+# Strip Mailcow's headers and set correct ones
+proxy_hide_header Strict-Transport-Security;
+proxy_hide_header Referrer-Policy;
+
+add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+more_set_headers "Referrer-Policy: same-origin";
+more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'self'; form-action 'self'; base-uri 'self';";
+```
+
+**Why this is needed:**
+- Mailcow's internal nginx sends `Strict-Transport-Security: max-age=15768000` (6 months)
+  which fails internet.nl's 1-year minimum requirement
+- Mailcow sends `Referrer-Policy: strict-origin` which internet.nl flags
+- `proxy_hide_header` strips Mailcow's headers before NPM adds the correct ones
+- `more_set_headers` is used for CSP and Referrer-Policy because nginx's `add_header`
+  in the server context gets overridden by `add_header` in NPM's location block
+
+### security.txt
+
+Already deployed at `/opt/mailcow-dockerized/data/web/.well-known/security.txt`.
+Shared by all domains served through Mailcow — no per-domain setup needed.
 
 ---
 
-## Key Lessons
-
-### DO
-- Create LiveDNS zone BEFORE switching nameservers
-- Use trailing dots in FQDNs: `mail.example.com.`
-- Query Gandi's authoritative NS (`ns-64-a.gandi.net`) for DNSKEY, not recursive resolvers
-- Verify domain services after changes
-- Keep backup of DNS records before migration
-
-### DON'T
-- Don't use the admin panel "Use Gandi LiveDNS" button (wipes DNS records)
-- Don't query recursive resolvers (8.8.8.8) for DNSKEY immediately after creation
-- Don't migrate production without testing workflow
-- Don't skip verification steps
-
----
-
-## Verification Checklist
+## Verification
 
 ```bash
-# 1. Check LiveDNS is active
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.gandi.net/v5/domain/domains/$DOMAIN" | \
-  jq '.services'
-# Expected: ["gandilivedns"] or ["dnssec", "gandilivedns"]
+# Check all records via Gandi API
+source /root/.credentials.env
+curl -s "https://api.gandi.net/v5/livedns/domains/$DOMAIN/records" \
+  -H "Authorization: Bearer $GANDI_TOKEN" | jq -c '.[] | {rrset_name, rrset_type}'
 
-# 2. Check DNS records preserved
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.gandi.net/v5/livedns/domains/$DOMAIN/records" | \
-  jq 'length'
-# Expected: record count matches pre-migration
-
-# 3. Check DNSSEC key active
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.gandi.net/v5/livedns/domains/$DOMAIN/keys" | \
-  jq '.[] | select(.deleted == false) | {status, algorithm_name}'
-# Expected: status: "active"
-
-# 4. Check DS record in TLD
+# Check DNSSEC
 dig DS $DOMAIN +short
-# Expected: DS record with matching keytag
-
-# 5. Check DNSSEC validation
 dig @8.8.8.8 +dnssec $DOMAIN A | grep "flags.*ad"
-# Expected: "ad" flag present
+
+# Check mail records
+dig MX $DOMAIN +short
+dig TXT $DOMAIN +short | grep spf
+dig TXT dkim._domainkey.$DOMAIN +short | grep DKIM
+dig TXT _dmarc.$DOMAIN +short | grep DMARC
+
+# internet.nl tests
+# Website: https://internet.nl/site/$DOMAIN/
+# Mail:    https://internet.nl/mail/$DOMAIN/
 ```
 
 ---
 
-## For Next Migration (nysattra.se, villaherrgard.se, sono-vagnala.se)
+## Domains Status
 
-### Recommended Workflow
-1. Create LiveDNS zone via API
-2. Add all DNS records via API
-3. Set Gandi nameservers via API (activates LiveDNS, preserves records)
-4. Create DNSSEC key via API
-5. Query DNSKEY from authoritative NS, POST to domain dnskeys
-6. Verify everything via API and dig commands
-
-### Time Estimate
-- API automation (all steps): 30-45 minutes
-- Verification: 15 minutes
-- **Total: 45-60 minutes per domain**
+| Domain | Gandi | Script Run | NPM | Status |
+|--------|-------|-----------|-----|--------|
+| keken.nu | ✅ Transferred | ✅ 2026-02-22 | ✅ Configured | Production |
+| nysattra.se | ⏳ Transferring | — | — | Waiting for transfer |
+| villaherrgard.se | ⏳ Transferring | — | — | Waiting for transfer |
+| sono-vagnala.se | ⏳ Transferring | — | — | Waiting for transfer |
 
 ---
 
-## Quick Fix Scripts
+## internet.nl Scores (2026-02-22)
 
-### Restore DNS Records
-```bash
-# Located at: /opt/mailcow-dockerized/restore-dns-gandi.sh
-./restore-dns-gandi.sh keken.nu $GANDI_TOKEN
-```
+**Website test:** 86% for both keken.nu and villaherrgard.com
 
-### Verify Complete Setup
-```bash
-# Located at: /opt/mailcow-dockerized/verify-gandi-dns.sh
-./verify-gandi-dns.sh keken.nu $GANDI_TOKEN
-```
+| Test | Status | Notes |
+|------|--------|-------|
+| DNSSEC | ✅ Passed | |
+| HTTPS/HSTS | ✅ Passed | 2-year max-age + preload |
+| RPKI | ✅ Passed | |
+| X-Frame-Options | ✅ Passed | |
+| X-Content-Type-Options | ✅ Passed | |
+| Referrer-Policy | ✅ Passed | same-origin |
+| security.txt | ℹ️ Info | Present and valid |
+| CSP | ⚠️ Warning | `unsafe-inline`/`unsafe-eval` required by Mailcow |
+| IPv6 | ❌ Failed | Disabled by design (no AAAA records) |
 
----
-
-## Support Resources
-
-- DNSSEC Solution: `GANDI-DNSSEC-API-COMPLETE-SOLUTION.md`
-- Full Report: `GANDI-DNS-MIGRATION-REPORT.md`
-- Gandi API Docs: https://api.gandi.net/docs/
-- Domain API: https://api.gandi.net/docs/domains/
-- LiveDNS API: https://api.gandi.net/docs/livedns/
+**Score ceiling is 86%** — the remaining deductions are IPv6 (disabled by design)
+and CSP (Mailcow requires `unsafe-inline`/`unsafe-eval`).
 
 ---
 
-**Last Updated:** 2026-02-21
-**Domain Tested:** keken.nu
-**Automation Level:** 100% (zero manual steps)
+**Last Updated:** 2026-02-22
+**Domains Tested:** keken.nu (full delete + recreate), villaherrgard.com (headers)
+**Automation Level:** 100% for DNS setup (zero manual steps), NPM config is manual

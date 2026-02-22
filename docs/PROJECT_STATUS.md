@@ -20,6 +20,8 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 
 **Gandi Token Auto-Renewal (Feb 2026):** Created `gandi-token-renew.sh` for automated Gandi PAT renewal. Checks expiry daily at 12:00 via `GET /tokeninfo`; when <=30 days remaining, renews via `POST /v5/organization/access-tokens`. Atomically updates `.credentials.env` (with `.previous` backup and rollback on verification failure), syncs certbot `credentials-gandi` file. Tiered notifications: INFO on success, WARNING on failure with >7 days left, ERROR when <=7 days. Added `schedule_gandi_token_renewal()` to scheduling.py and integrated into init.sh Phase 2. Seeded `credentials-gandi` certbot credential file for Gandi DNS challenges.
 
+**Gandi Domain Setup Automation (Feb 2026):** Created `setup-gandi-domain.sh` — fully automated DNS zone setup for mail domains transferred to Gandi. Performs 8 prerequisite checks (credentials, API token, Gandi domain, Mailcow domain, DKIM key, mail host resolution, tools), creates 18 DNS records via LiveDNS API (A, mail A, MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, autoconfig/autodiscover CNAMEs, 6 SRVs, CAA), activates LiveDNS nameservers, enables DNSSEC with DS record publication, and verifies records via dig. Integrated into TUI (Maintenance → Setup Gandi Domain) with input dialog, confirmation, progress display, scrollable output, and manual steps checklist. Tested on keken.nu with full delete + recreate cycle. Also deployed `security.txt` at `/opt/mailcow-dockerized/data/web/.well-known/security.txt` (shared by all Mailcow domains) and documented NPM security header configuration (proxy_hide_header + more_set_headers) to fix HSTS/Referrer-Policy/CSP for internet.nl compliance. Website test score: 86% (ceiling due to IPv6 disabled by design and Mailcow CSP constraints).
+
 ## Completed Phases ✅
 
 ### ✅ Phase 1: Foundation (COMPLETE)
@@ -142,6 +144,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 - ✅ Update Mailcow via official script
 - ✅ System package updates
 - ✅ Docker cleanup
+- ✅ Setup Gandi Domain (automated DNS zone + DNSSEC)
 - ✅ Service status monitoring
 - ✅ Container statistics
 - ✅ Disk usage monitoring
@@ -150,7 +153,7 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 **Files Created:**
 - `lib/maintenance.py` (635 lines)
 - `lib/monitoring.py` (532 lines)
-- `lib/handlers/maintenance_handlers.py` (327 lines)
+- `lib/handlers/maintenance_handlers.py` (407 lines)
 - `lib/handlers/monitoring_handlers.py` (259 lines)
 
 **Key Features:**
@@ -404,7 +407,7 @@ Only manual step after init.sh completes: request PTR/rDNS from hosting provider
 | **Core Modules** | 9 files |
 | **Handler Modules** | 7 files (incl. `__init__.py`) |
 | **CLI Entry Point** | 1 file (cli.py - 145 lines) |
-| **Shell Scripts** | 6 files (~1,200 lines total incl. bootstrap) |
+| **Shell Scripts** | 7 files (~1,760 lines total incl. bootstrap) |
 | **Configuration Files** | 2 files (settings.yaml, notifications.yaml) |
 | **Main Application** | 511 lines |
 
@@ -424,7 +427,7 @@ Only manual step after init.sh completes: request PTR/rDNS from hosting provider
 | `lib/config.py` | 320 | Config management |
 | `lib/utils.py` | 486 | Utilities (incl. systemd helpers) |
 | **Handler Files** | ~2,055 | Menu operations (7 files) |
-| **Scripts** | ~720 | Shell scripts (4 in scripts/) |
+| **Scripts** | ~1,280 | Shell scripts (5 in scripts/) |
 | **Bootstrap** | ~485 | Bootstrap/install scripts |
 | **Main App** | 511 | TUI entry point |
 
@@ -436,13 +439,13 @@ Only manual step after init.sh completes: request PTR/rDNS from hosting provider
 | **Restore** | 7 | 7 (100%) | 0 (credentials, nginx, mailcow, mailcow-dir, server-mgr, monitoring-stack, CLI restore) |
 | **Installation** | 4 | 4 (100%) | 0 |
 | **System Config** | 4 | 4 (100%) | 0 |
-| **Maintenance** | 5 | 5 (100%) | 0 |
+| **Maintenance** | 6 | 6 (100%) | 0 (incl. Gandi domain setup) |
 | **Monitoring** | 5 | 5 (100%) | 0 |
 | **Scheduling** | 7 | 7 (100%) | 0 (queue-based window scheduling) |
 | **Settings** | 1 | 1 (100%) | 0 |
 | **DR** | 6 | 6 (100%) | 0 |
 | **Testing** | 10 | 0 (0%) | 10 (Full phase) |
-| **TOTAL** | 55 | 48 (87%) | 7 (13%) |
+| **TOTAL** | 56 | 49 (88%) | 7 (13%) |
 
 ## Production Readiness Assessment
 
@@ -553,5 +556,5 @@ The application is **ready for production use** with:
 **Production Ready:** ✅ **YES**
 **Recommended Next Step:** User documentation and unit tests (Phase 8)
 
-**Last Updated:** 2026-02-21
+**Last Updated:** 2026-02-22
 **Version:** 1.2
