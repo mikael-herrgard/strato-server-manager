@@ -900,9 +900,10 @@ class RestoreManager:
             run_command(['dpkg', '--configure', '-a'], check=False, timeout=120)
 
             # Ensure prerequisites
+            apt_env = {**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
             run_command(
                 ['apt-get', 'install', '-y', 'apt-transport-https', 'gnupg', 'curl'],
-                check=True, timeout=120
+                check=True, timeout=120, env=apt_env
             )
 
             if not influx_installed:
@@ -951,7 +952,7 @@ class RestoreManager:
 
             run_command(
                 ['apt-get', 'install', '-y'] + packages,
-                check=True, timeout=600
+                check=True, timeout=600, env=apt_env
             )
 
             # Stop services — restore will replace data and start them

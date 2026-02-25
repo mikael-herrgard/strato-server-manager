@@ -78,3 +78,36 @@ else
         logger -t memory-alert "Memory recovered: RAM available ${ram_avail_pct}%, swap used ${swap_used_pct}%"
     fi
 fi
+
+# Check if a reboot is required (e.g. kernel security update)
+REBOOT_STATE_FILE="/tmp/reboot-required-alert-sent"
+
+if [ -f /var/run/reboot-required ]; then
+    if [ ! -f "$REBOOT_STATE_FILE" ]; then
+        reboot_pkgs=""
+        if [ -f /var/run/reboot-required.pkgs ]; then
+            reboot_pkgs=$(cat /var/run/reboot-required.pkgs)
+        fi
+
+        msmtp -t <<EOF
+To: ${ALERT_EMAIL}
+From: ${FROM_NAME} <root@villaherrgard.com>
+Subject: [VPS ALERT] Reboot required on $(hostname)
+
+A system update requires a reboot.
+
+Detected at: $(date '+%Y-%m-%d %H:%M:%S')
+Uptime: $(uptime -p)
+
+Packages requiring reboot:
+${reboot_pkgs:-unknown}
+
+Please schedule a reboot at your earliest convenience.
+EOF
+
+        touch "$REBOOT_STATE_FILE"
+        logger -t memory-alert "Reboot-required alert sent"
+    fi
+else
+    rm -f "$REBOOT_STATE_FILE"
+fi
