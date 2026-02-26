@@ -296,9 +296,9 @@ do_record "@" "TXT" "$TTL" "[\"\\\"v=spf1 mx a:$MAIL_HOST ip4:$SERVER_IP -all\\\
 do_record "${DKIM_SELECTOR}._domainkey" "TXT" "$TTL" \
     "[\"\\\"v=DKIM1;k=rsa;t=s;s=email;p=$DKIM_PUBKEY\\\"\"]"
 
-# DMARC TXT: _dmarc -> v=DMARC1; p=quarantine; adkim=s; aspf=s; rua/ruf reporting
+# DMARC TXT: _dmarc -> v=DMARC1; p=reject; adkim=s; aspf=s; rua/ruf reporting
 do_record "_dmarc" "TXT" "$TTL" \
-    "[\"\\\"v=DMARC1; p=quarantine; adkim=s; aspf=s; rua=mailto:postmaster@$DOMAIN; ruf=mailto:postmaster@$DOMAIN; fo=1\\\"\"]"
+    "[\"\\\"v=DMARC1; p=reject; adkim=s; aspf=s; rua=mailto:postmaster@$DOMAIN; ruf=mailto:postmaster@$DOMAIN; fo=1\\\"\"]"
 
 # MTA-STS A: mta-sts -> server IP
 do_record "mta-sts" "A" "$TTL" "[\"$SERVER_IP\"]"
