@@ -10,7 +10,7 @@ STATE_FILE="/tmp/memory-alert-sent"
 
 # Thresholds
 RAM_THRESHOLD=15    # alert when available RAM drops below 15%
-SWAP_THRESHOLD=25   # alert when swap usage exceeds 25%
+SWAP_THRESHOLD=50   # alert when swap usage exceeds 50%
 
 # Read memory info
 read -r mem_total mem_available <<< "$(awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{print t, a}' /proc/meminfo)"
