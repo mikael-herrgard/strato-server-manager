@@ -1,5 +1,5 @@
 #!/bin/bash
-# weekly-summary.sh -- Send weekly server health summary email
+# weekly-summary.sh -- Send weekly server health summary email (HTML)
 # Runs via cron every Sunday at 08:00
 
 set -euo pipefail
@@ -16,11 +16,32 @@ BACKUP_LOG_DIR="/opt/server-manager/logs"
 CERT_DIR="/root/nginx/letsencrypt/live"
 STALE_HOURS=48
 
+# ── HTML helpers ──────────────────────────────────────────────────
+
+status_class() {
+    case "$1" in
+        OK)                          echo "ok" ;;
+        STALE|"RENEW SOON")         echo "warn" ;;
+        EXPIRING|DEGRADED*|NONE|"NO LOG") echo "error" ;;
+        *)                           echo "" ;;
+    esac
+}
+
+html_kv_row() {
+    local label="$1" value="$2" class="${3:-}"
+    if [ -n "$class" ]; then
+        echo "<tr><td class=\"label\">${label}</td><td class=\"value ${class}\">${value}</td></tr>"
+    else
+        echo "<tr><td class=\"label\">${label}</td><td class=\"value\">${value}</td></tr>"
+    fi
+}
+
 # ── Section collectors ──────────────────────────────────────────────
 
 collect_system() {
     local uptime_str load_1 load_5 load_15
-    local mem_total mem_available mem_used swap_total swap_free swap_used
+    local mem_total mem_available mem_used mem_total_mb mem_pct
+    local swap_total swap_free swap_line
     local disk_usage
 
     uptime_str=$(uptime -p)
@@ -33,25 +54,25 @@ collect_system() {
 
     read -r swap_total swap_free <<< "$(awk '/SwapTotal/{t=$2} /SwapFree/{f=$2} END{print t, f}' /proc/meminfo)"
     if [ "$swap_total" -gt 0 ]; then
+        local swap_used swap_total_mb swap_pct
         swap_used=$(( (swap_total - swap_free) / 1024 ))
         swap_total_mb=$(( swap_total / 1024 ))
         swap_pct=$(( (swap_total - swap_free) * 100 / swap_total ))
-        swap_line="Swap:     ${swap_used} MB / ${swap_total_mb} MB (${swap_pct}% used)"
+        swap_line="${swap_used} MB / ${swap_total_mb} MB (${swap_pct}% used)"
     else
-        swap_line="Swap:     not configured"
+        swap_line="not configured"
     fi
 
     disk_usage=$(df -h / | awk 'NR==2{printf "%s used / %s total (%s)", $3, $2, $5}')
 
-    SECTION_SYSTEM=$(cat <<EOF
-SYSTEM HEALTH
-  Uptime:   ${uptime_str}
-  Load:     ${load_1} / ${load_5} / ${load_15} (1/5/15 min)
-  RAM:      ${mem_used} MB / ${mem_total_mb} MB (${mem_pct}% available)
-  ${swap_line}
-  Disk /:   ${disk_usage}
-EOF
-)
+    SECTION_SYSTEM="<h2>System Health</h2>
+<table>
+$(html_kv_row 'Uptime' "$uptime_str")
+$(html_kv_row 'Load' "${load_1} / ${load_5} / ${load_15} (1/5/15 min)")
+$(html_kv_row 'RAM' "${mem_used} MB / ${mem_total_mb} MB (${mem_pct}% available)")
+$(html_kv_row 'Swap' "$swap_line")
+$(html_kv_row 'Disk /' "$disk_usage")
+</table>"
 }
 
 collect_security() {
@@ -79,15 +100,14 @@ collect_security() {
         banned_ips="none"
     fi
 
-    SECTION_SECURITY=$(cat <<EOF
-SECURITY
-  SSH failed attempts (7d):    ${ssh_failures}
-  fail2ban sshd bans (7d):     ${sshd_bans_week}
-  Currently banned (sshd):     ${sshd_banned_now}
-  Currently banned (recidive): ${recidive_banned_now}
-  Banned IPs:                  ${banned_ips}
-EOF
-)
+    SECTION_SECURITY="<h2>Security</h2>
+<table>
+$(html_kv_row 'SSH failures (7d)' "$ssh_failures")
+$(html_kv_row 'f2b sshd bans (7d)' "$sshd_bans_week")
+$(html_kv_row 'Banned now (sshd)' "$sshd_banned_now")
+$(html_kv_row 'Banned now (recid.)' "$recidive_banned_now")
+$(html_kv_row 'Banned IPs' "$banned_ips")
+</table>"
 }
 
 collect_mail() {
@@ -119,21 +139,19 @@ collect_mail() {
         ham_count="n/a"
     fi
 
-    SECTION_MAIL=$(cat <<EOF
-MAIL
-  Delivered (7d):  ${sent}
-  Bounced (7d):    ${bounced}
-  Rejected (7d):   ${rejected}
-  Queue:           ${queue_count} messages
-  Rspamd ham:      ${ham_count}
-  Rspamd spam:     ${spam_count}
-EOF
-)
+    SECTION_MAIL="<h2>Mail</h2>
+<table>
+$(html_kv_row 'Delivered (7d)' "$sent")
+$(html_kv_row 'Bounced (7d)' "$bounced")
+$(html_kv_row 'Rejected (7d)' "$rejected")
+$(html_kv_row 'Queue' "${queue_count} messages")
+$(html_kv_row 'Rspamd ham' "$ham_count")
+$(html_kv_row 'Rspamd spam' "$spam_count")
+</table>"
 }
 
 collect_backups() {
-    local lines=""
-    local now_epoch
+    local now_epoch rows=""
     now_epoch=$(date +%s)
 
     for service in $BACKUP_SERVICES; do
@@ -141,7 +159,9 @@ collect_backups() {
         local last_success last_failure age_hours status
 
         if [ ! -f "$log_file" ]; then
-            lines+="  ${service}: NO LOG FILE"$'\n'
+            local cls
+            cls=$(status_class "NO LOG")
+            rows+="<tr><td>${service}</td><td>--</td><td>--</td><td class=\"${cls}\">NO LOG</td></tr>"
             continue
         fi
 
@@ -156,30 +176,40 @@ collect_backups() {
             age_hours=$(( (now_epoch - success_epoch) / 3600 ))
 
             if [ "$age_hours" -ge "$STALE_HOURS" ]; then
-                status="STALE (${age_hours}h ago)"
+                status="STALE"
             else
-                status="OK (${age_hours}h ago)"
+                status="OK"
             fi
 
-            lines+="$(printf "  %-22s %s  %s" "${service}:" "${last_success}" "${status}")"$'\n'
+            local cls
+            cls=$(status_class "$status")
+            rows+="<tr><td>${service}</td><td>${last_success}</td><td>${age_hours}h</td><td class=\"${cls}\">${status}</td></tr>"
         else
-            lines+="  ${service}: NO SUCCESSFUL BACKUP FOUND"$'\n'
+            local cls
+            cls=$(status_class "NONE")
+            rows+="<tr><td>${service}</td><td>--</td><td>--</td><td class=\"${cls}\">NONE</td></tr>"
         fi
 
         if [ -n "$last_failure" ]; then
-            lines+="    Last failure: ${last_failure}"$'\n'
+            rows+="<tr><td colspan=\"4\" style=\"font-size:11px;color:#999;padding-left:20px;\">Last failure: ${last_failure}</td></tr>"
         fi
     done
 
-    # Remove trailing newline
-    SECTION_BACKUPS="BACKUPS"$'\n'"${lines%$'\n'}"
+    SECTION_BACKUPS="<h2>Backups</h2>
+<table>
+<tr><th>Service</th><th>Last Success</th><th>Age</th><th>Status</th></tr>
+${rows}
+</table>"
 }
 
 collect_tls() {
-    local lines=""
+    local rows=""
 
     if [ ! -d "$CERT_DIR" ]; then
-        SECTION_TLS="TLS CERTIFICATES"$'\n'"  Certificate directory not found"
+        SECTION_TLS="<h2>TLS Certificates</h2>
+<table>
+<tr><td>Certificate directory not found</td></tr>
+</table>"
         return
     fi
 
@@ -204,19 +234,24 @@ collect_tls() {
             status="OK"
         fi
 
-        lines+="$(printf "  %-35s %3d days  %s" "$cn" "$days_left" "$status")"$'\n'
+        local cls
+        cls=$(status_class "$status")
+        rows+="<tr><td>${cn}</td><td>${days_left} days</td><td class=\"${cls}\">${status}</td></tr>"
     done
 
-    if [ -z "$lines" ]; then
-        lines="  No certificates found"$'\n'
+    if [ -z "$rows" ]; then
+        rows="<tr><td colspan=\"3\">No certificates found</td></tr>"
     fi
 
-    # Remove trailing newline
-    SECTION_TLS="TLS CERTIFICATES"$'\n'"${lines%$'\n'}"
+    SECTION_TLS="<h2>TLS Certificates</h2>
+<table>
+<tr><th>Domain</th><th>Expires</th><th>Status</th></tr>
+${rows}
+</table>"
 }
 
 collect_docker() {
-    local running restart_info=""
+    local running restart_rows=""
 
     running=$(docker ps -q 2>/dev/null | wc -l)
 
@@ -229,19 +264,31 @@ collect_docker() {
         status="UNEXPECTED (more than expected)"
     fi
 
+    local cls
+    cls=$(status_class "$status")
+
     # Check for containers with restart counts > 0
     local restarts
-    restarts=$(docker ps -q 2>/dev/null | xargs -r docker inspect --format '{{.Name}} {{.RestartCount}}' 2>/dev/null | awk '$2 > 0 {printf "  %-40s restarts: %s\n", $1, $2}' || echo "")
+    restarts=$(docker ps -q 2>/dev/null | xargs -r docker inspect --format '{{.Name}} {{.RestartCount}}' 2>/dev/null \
+        | awk '$2 > 0' || echo "")
 
     if [ -n "$restarts" ]; then
-        restart_info="\n${restarts}"
+        restart_rows="<h2>Container Restarts</h2>
+<table>
+<tr><th>Container</th><th>Restarts</th></tr>"
+        while read -r name count; do
+            restart_rows+="<tr><td>${name}</td><td>${count}</td></tr>"
+        done <<< "$restarts"
+        restart_rows+="
+</table>"
     fi
 
-    SECTION_DOCKER=$(cat <<EOF
-DOCKER
-  Running: ${running} / ${EXPECTED_CONTAINERS} — ${status}${restart_info}
-EOF
-)
+    SECTION_DOCKER="<h2>Docker</h2>
+<table>
+$(html_kv_row 'Containers' "${running} / ${EXPECTED_CONTAINERS}" "$cls")
+$(html_kv_row 'Status' "$status" "$cls")
+</table>
+${restart_rows}"
 }
 
 # ── Main ────────────────────────────────────────────────────────────
@@ -257,22 +304,53 @@ msmtp -t <<EOF
 To: ${ALERT_EMAIL}
 From: ${FROM_NAME} <root@villaherrgard.com>
 Subject: [VPS Summary] Weekly Health Report — ${HOSTNAME} (${DATE})
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
 
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }
+.container { max-width: 640px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.header { background: #2c3e50; color: #ffffff; padding: 16px 20px; }
+.header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.header p { margin: 4px 0 0; font-size: 13px; opacity: 0.8; }
+.content { padding: 0 20px 20px; }
+h2 { background: #2c3e50; color: #ffffff; padding: 8px 14px; margin: 20px -20px 0; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td, th { padding: 7px 10px; border-bottom: 1px solid #eee; text-align: left; }
+td.label { width: 40%; color: #555; }
+td.value { font-weight: 500; }
+th { background: #f8f9fa; text-transform: uppercase; font-size: 12px; color: #666; font-weight: 600; letter-spacing: 0.3px; }
+.ok { color: #27ae60; font-weight: 600; }
+.warn { color: #e67e22; font-weight: 600; }
+.error { color: #e74c3c; font-weight: 600; }
+.footer { padding: 14px 20px; font-size: 11px; color: #999; border-top: 1px solid #eee; text-align: center; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<h1>Weekly Health Report</h1>
+<p>${HOSTNAME} &mdash; ${DATE}</p>
+</div>
+<div class="content">
 ${SECTION_SYSTEM}
-
 ${SECTION_SECURITY}
-
 ${SECTION_MAIL}
-
 ${SECTION_BACKUPS}
-
 ${SECTION_TLS}
-
 ${SECTION_DOCKER}
-
---
-Weekly health summary from ${HOSTNAME}
+</div>
+<div class="footer">
+Weekly health summary from ${HOSTNAME}<br>
 Generated at $(date '+%Y-%m-%d %H:%M:%S')
+</div>
+</div>
+</body>
+</html>
 EOF
 
 logger -t weekly-summary "Weekly health summary sent to ${ALERT_EMAIL}"
