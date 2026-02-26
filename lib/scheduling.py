@@ -141,6 +141,10 @@ class SchedulingManager:
             return 'update'
         elif 'health-check' in command:
             return 'health_check'
+        elif 'weekly-summary' in command:
+            return 'weekly_summary'
+        elif 'memory-alert' in command:
+            return 'memory_alert'
         else:
             return 'unknown'
 
@@ -514,6 +518,45 @@ class SchedulingManager:
 
         except Exception as e:
             logger.error(f"Failed to schedule Gandi token renewal: {e}")
+            return False
+
+    def schedule_weekly_summary(self) -> bool:
+        """
+        Schedule weekly health summary email at Sunday 08:00.
+
+        Replaces any existing weekly_summary cron job.
+
+        Returns:
+            True if scheduled successfully
+        """
+        try:
+            script_path = "/opt/server-manager/scripts/weekly-summary.sh"
+            log_file = "/opt/server-manager/logs/weekly-summary-cron.log"
+            lock_file = "/tmp/weekly-summary.lock"
+
+            cmd = f"flock -n {lock_file} {script_path} >> {log_file} 2>&1"
+
+            current = self.get_current_schedule()
+            jobs = [j for j in current.get('jobs', []) if j['type'] != 'weekly_summary']
+
+            jobs.append({
+                'minute': '0',
+                'hour': '8',
+                'day': '*',
+                'month': '*',
+                'weekday': '0',
+                'command': cmd,
+                'schedule': '0 8 * * 0',
+                'type': 'weekly_summary'
+            })
+
+            self._write_crontab(jobs)
+
+            logger.info("Scheduled weekly summary: Sunday at 08:00")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to schedule weekly summary: {e}")
             return False
 
     def get_next_run_time(self, schedule: str) -> Optional[str]:
