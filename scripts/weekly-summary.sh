@@ -70,7 +70,7 @@ collect_security() {
     sshd_bans_week=$(awk -v since="$WEEK_AGO" '$0 >= since && /\[sshd\].*Ban/' /var/log/fail2ban.log 2>/dev/null | wc -l)
 
     # SSH failed login attempts this week
-    ssh_failures=$(journalctl _COMM=sshd --since "$WEEK_AGO" --no-pager 2>/dev/null | grep -c "Failed password\|Invalid user\|authentication failure" || echo "0")
+    ssh_failures=$(journalctl _COMM=sshd --since "$WEEK_AGO" --no-pager 2>/dev/null | grep -c "Failed password\|Invalid user\|authentication failure" || true)
 
     # Currently banned IPs (sshd)
     local banned_ips
@@ -98,9 +98,9 @@ collect_mail() {
     local postfix_logs
     postfix_logs=$(docker logs mailcowdockerized-postfix-mailcow-1 --since 168h 2>&1 || echo "")
 
-    sent=$(echo "$postfix_logs" | grep -c 'status=sent' || echo "0")
-    bounced=$(echo "$postfix_logs" | grep -c 'status=bounced' || echo "0")
-    rejected=$(echo "$postfix_logs" | grep -c 'NOQUEUE: reject' || echo "0")
+    sent=$(echo "$postfix_logs" | grep -c 'status=sent' || true)
+    bounced=$(echo "$postfix_logs" | grep -c 'status=bounced' || true)
+    rejected=$(echo "$postfix_logs" | grep -c 'NOQUEUE: reject' || true)
 
     # Mail queue
     queue_count=$(docker exec mailcowdockerized-postfix-mailcow-1 mailq 2>/dev/null | tail -1 | grep -oP '\d+(?= Request)' || echo "0")
@@ -141,7 +141,7 @@ collect_backups() {
         local last_success last_failure age_hours status
 
         if [ ! -f "$log_file" ]; then
-            lines="${lines}  ${service}: NO LOG FILE\n"
+            lines+="  ${service}: NO LOG FILE"$'\n'
             continue
         fi
 
@@ -161,25 +161,25 @@ collect_backups() {
                 status="OK (${age_hours}h ago)"
             fi
 
-            local line="  %-22s %s  %s\n"
-            lines="${lines}$(printf "$line" "${service}:" "${last_success}" "${status}")"
+            lines+="$(printf "  %-22s %s  %s" "${service}:" "${last_success}" "${status}")"$'\n'
         else
-            lines="${lines}  ${service}: NO SUCCESSFUL BACKUP FOUND\n"
+            lines+="  ${service}: NO SUCCESSFUL BACKUP FOUND"$'\n'
         fi
 
         if [ -n "$last_failure" ]; then
-            lines="${lines}    Last failure: ${last_failure}\n"
+            lines+="    Last failure: ${last_failure}"$'\n'
         fi
     done
 
-    SECTION_BACKUPS=$(printf "BACKUPS\n%b" "$lines")
+    # Remove trailing newline
+    SECTION_BACKUPS="BACKUPS"$'\n'"${lines%$'\n'}"
 }
 
 collect_tls() {
     local lines=""
 
     if [ ! -d "$CERT_DIR" ]; then
-        SECTION_TLS="TLS CERTIFICATES\n  Certificate directory not found"
+        SECTION_TLS="TLS CERTIFICATES"$'\n'"  Certificate directory not found"
         return
     fi
 
@@ -204,14 +204,15 @@ collect_tls() {
             status="OK"
         fi
 
-        lines="${lines}$(printf "  %-35s %3d days  %s\n" "$cn" "$days_left" "$status")"
+        lines+="$(printf "  %-35s %3d days  %s" "$cn" "$days_left" "$status")"$'\n'
     done
 
     if [ -z "$lines" ]; then
-        lines="  No certificates found"
+        lines="  No certificates found"$'\n'
     fi
 
-    SECTION_TLS=$(printf "TLS CERTIFICATES\n%s" "$lines")
+    # Remove trailing newline
+    SECTION_TLS="TLS CERTIFICATES"$'\n'"${lines%$'\n'}"
 }
 
 collect_docker() {
