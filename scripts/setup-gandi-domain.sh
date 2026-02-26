@@ -319,11 +319,20 @@ do_record "autodiscover" "CNAME" "$TTL" "[\"$MAIL_HOST.\"]"
 
 # SRV records
 do_record "_autodiscover._tcp" "SRV" "$TTL" "[\"0 1 443 $MAIL_HOST.\"]"
+do_record "_caldavs._tcp" "SRV" "$TTL" "[\"0 1 443 $MAIL_HOST.\"]"
+do_record "_carddavs._tcp" "SRV" "$TTL" "[\"0 1 443 $MAIL_HOST.\"]"
 do_record "_imap._tcp" "SRV" "$TTL" "[\"0 1 143 $MAIL_HOST.\"]"
 do_record "_imaps._tcp" "SRV" "$TTL" "[\"0 1 993 $MAIL_HOST.\"]"
 do_record "_pop3._tcp" "SRV" "$TTL" "[\"0 1 110 $MAIL_HOST.\"]"
 do_record "_pop3s._tcp" "SRV" "$TTL" "[\"0 1 995 $MAIL_HOST.\"]"
+do_record "_sieve._tcp" "SRV" "$TTL" "[\"0 1 4190 $MAIL_HOST.\"]"
+do_record "_smtps._tcp" "SRV" "$TTL" "[\"0 1 465 $MAIL_HOST.\"]"
 do_record "_submission._tcp" "SRV" "$TTL" "[\"0 1 587 $MAIL_HOST.\"]"
+do_record "_submissions._tcp" "SRV" "$TTL" "[\"0 1 465 $MAIL_HOST.\"]"
+
+# CalDAV/CardDAV path hints for SOGo
+do_record "_caldavs._tcp" "TXT" "$TTL" "[\"\\\"path=/SOGo/dav/\\\"\"]"
+do_record "_carddavs._tcp" "TXT" "$TTL" "[\"\\\"path=/SOGo/dav/\\\"\"]"
 
 # CAA records: issue, issuewild, iodef
 do_record "@" "CAA" "$TTL" \
