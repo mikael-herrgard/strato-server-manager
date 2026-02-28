@@ -384,8 +384,20 @@ def stop_systemd_service(service_name: str) -> bool:
         service_name: Name of the systemd service (e.g., 'grafana-server')
 
     Returns:
-        True if successful
+        True if successful (or service was not running/not found)
     """
+    try:
+        returncode, stdout, stderr = run_command(
+            ['systemctl', 'is-active', service_name],
+            check=False,
+            timeout=10
+        )
+        if stdout.strip() != 'active':
+            logger.info(f"Service not running, skip stop: {service_name}")
+            return True
+    except Exception:
+        pass
+
     logger.info(f"Stopping systemd service: {service_name}")
 
     try:

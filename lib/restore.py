@@ -1014,12 +1014,11 @@ class RestoreManager:
         bridge_service = monitoring_config['bridge_service']
         bridge_timer = monitoring_config['bridge_timer']
 
-        # Stop services
+        # Stop services (if running — on fresh DR they won't be)
         logger.info("Stopping monitoring services...")
         services_to_stop = ['grafana-server', 'influxdb', bridge_timer]
         for svc in services_to_stop:
-            if verify_systemd_service(svc):
-                stop_systemd_service(svc)
+            stop_systemd_service(svc)
 
         # Create temporary extraction directory
         temp_dir = os.path.join(
