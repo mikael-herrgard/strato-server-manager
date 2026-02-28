@@ -334,9 +334,9 @@ do_record "_submissions._tcp" "SRV" "$TTL" "[\"0 1 465 $MAIL_HOST.\"]"
 do_record "_caldavs._tcp" "TXT" "$TTL" "[\"\\\"path=/SOGo/dav/\\\"\"]"
 do_record "_carddavs._tcp" "TXT" "$TTL" "[\"\\\"path=/SOGo/dav/\\\"\"]"
 
-# CAA records: issue, issuewild, iodef
+# CAA records: issue, issuewild, issuemail, iodef
 do_record "@" "CAA" "$TTL" \
-    "[\"0 issue \\\"letsencrypt.org\\\"\", \"0 issuewild \\\"letsencrypt.org\\\"\", \"0 iodef \\\"mailto:postmaster@$DOMAIN\\\"\"]"
+    "[\"0 issue \\\"letsencrypt.org\\\"\", \"0 issuewild \\\"letsencrypt.org\\\"\", \"0 issuemail \\\";\\\"\", \"0 iodef \\\"mailto:postmaster@$DOMAIN\\\"\"]"
 
 log ""
 log "DNS records: $RECORDS_CREATED created, $RECORDS_FAILED failed"
