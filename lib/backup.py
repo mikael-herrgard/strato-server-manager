@@ -684,6 +684,11 @@ class BackupManager:
             monitoring_config['bridge_install_path'],
         ]
 
+        # Include InfluxDB CLI config if it exists (contains API token for CLI access)
+        influxdb_cli_config = os.path.expanduser('~/.influxdbv2')
+        if os.path.isdir(influxdb_cli_config):
+            source_paths.append(influxdb_cli_config)
+
         # Add systemd unit files if they exist
         bridge_service_path = f"/etc/systemd/system/{monitoring_config['bridge_service']}"
         bridge_timer_path = f"/etc/systemd/system/{monitoring_config['bridge_timer']}"

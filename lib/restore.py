@@ -1047,6 +1047,7 @@ class RestoreManager:
                 (influxdb_data, influxdb_data),
                 (influxdb_config, influxdb_config),
                 (bridge_path, bridge_path),
+                (os.path.expanduser('~/.influxdbv2'), os.path.expanduser('~/.influxdbv2')),
             ]
 
             for target_path, source_rel in restore_mappings:
