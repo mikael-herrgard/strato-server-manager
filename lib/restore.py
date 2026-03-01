@@ -44,6 +44,7 @@ class RestoreManager:
             self.borg_env['BORG_PASSPHRASE'] = passphrase
 
         self.borg_env['BORG_REMOTE_PATH'] = self.borg_config['remote_path']
+        self.borg_env['BORG_RELOCATED_REPO_ACCESS_IS_OK'] = 'yes'
 
         # Local staging area for downloads
         self.local_staging = self.backup_config['local_staging']
