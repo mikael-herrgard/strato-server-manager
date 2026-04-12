@@ -59,26 +59,8 @@ class BackupHandlers:
 
     def handle_backup_mailcow(self):
         """Backup Mailcow"""
-        # Show backup type selection
-        backup_types = [
-            ("all", "Complete backup (recommended)", True),
-            ("config", "Configuration only", False),
-            ("mail", "Mail data only", False),
-            ("db", "Database only", False)
-        ]
-
-        backup_type = self.ui.show_radiolist(
-            backup_types,
-            "Mailcow Backup Type",
-            "Select Mailcow backup type:\n\n"
-            "Complete backup includes all data and is recommended."
-        )
-
-        if backup_type is None:
-            return
-
         if not self.ui.confirm_action(
-            f"This will create a {backup_type} backup of Mailcow.\n\n"
+            "This will create a complete backup of Mailcow.\n\n"
             "The backup will be stored on your rsync server.\n\n"
             "This may take 15-60 minutes depending on your mail volume.\n\n"
             "Continue?",
@@ -90,19 +72,19 @@ class BackupHandlers:
             backup_mgr = self._get_backup_manager()
 
             self.ui.show_infobox(
-                f"Creating Mailcow backup ({backup_type})...\n\n"
+                "Creating Mailcow backup...\n\n"
                 "This may take 15-60 minutes.\n"
                 "Please be patient..."
             )
 
-            success = backup_mgr.backup_mailcow(backup_type=backup_type, verify=True)
+            success = backup_mgr.backup_mailcow(backup_type="all", verify=True)
 
             if success:
                 self.ui.show_success(
-                    f"Mailcow backup ({backup_type}) completed successfully!\n\n"
+                    "Mailcow backup completed successfully!\n\n"
                     "The backup has been stored on your rsync server and verified."
                 )
-                logger.info(f"Mailcow backup ({backup_type}) completed via TUI")
+                logger.info("Mailcow backup completed via TUI")
             else:
                 self.ui.show_error("Mailcow backup failed. Check logs for details.")
 

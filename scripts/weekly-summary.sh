@@ -10,7 +10,7 @@ HOSTNAME=$(hostname)
 DATE=$(date '+%Y-%m-%d')
 WEEK_AGO=$(date -d '7 days ago' '+%Y-%m-%d %H:%M:%S')
 
-EXPECTED_CONTAINERS=20
+EXPECTED_CONTAINERS=21
 BACKUP_SERVICES="credentials nginx mailcow-directory mailcow server-manager monitoring-stack"
 BACKUP_LOG_DIR="/opt/server-manager/logs"
 CERT_DIR="/root/nginx/letsencrypt/live"
