@@ -242,87 +242,34 @@ _submission._tcp.villaherrgard.com   SRV    0 1 587 mail.villaherrgard.com
 
 **Certificate Location:** `/root/nginx/letsencrypt/live/npm-2/`
 
-### 4.3 Certificate Renewal Hook
+### 4.3 Certificate Sync (Host-side Cron)
 
-**File:** `/root/nginx/letsencrypt/renewal-hooks/deploy/sync-mailcow-certs.sh`
+**File:** `/opt/server-manager/scripts/sync-mailcow-certs.sh`
 
-This script automatically:
-1. Copies renewed certificates from NPM to mailcow
-2. Restarts mailcow mail services
-3. Updates TLSA records in Cloudflare
+**Why a cron job instead of a certbot deploy hook?** Certbot runs *inside* the NPM container
+where host paths (`/opt/mailcow-dockerized/...`) and the `docker` CLI don't exist. A previous
+deploy hook at `/root/nginx/letsencrypt/renewal-hooks/deploy/` silently failed for this reason.
 
-```bash
-#!/bin/bash
-# NPM Certificate Renewal Hook - Sync to Mailcow
-# This script runs automatically after NPM renews certificates
+This script runs daily at 04:00 via cron and:
+1. Compares SHA256 fingerprints of NPM and Mailcow certificates
+2. Exits silently if they match (no log spam)
+3. If different: backs up old cert, copies new cert+key, restarts mail services
+4. Verifies the new cert is being served on IMAP port 993
+5. Sends email notification on sync (success or failure)
 
-set -e
-
-# Source and destination paths
-NPM_CERT="/root/nginx/letsencrypt/live/npm-2/fullchain.pem"
-NPM_KEY="/root/nginx/letsencrypt/live/npm-2/privkey.pem"
-MAILCOW_CERT="/opt/mailcow-dockerized/data/assets/ssl/cert.pem"
-MAILCOW_KEY="/opt/mailcow-dockerized/data/assets/ssl/key.pem"
-
-# Log file
-LOG_FILE="/var/log/mailcow-cert-sync.log"
-
-echo "[$(date)] Starting certificate sync..." | tee -a "$LOG_FILE"
-
-# Check if NPM certificates exist
-if [ ! -f "$NPM_CERT" ] || [ ! -f "$NPM_KEY" ]; then
-    echo "[$(date)] ERROR: NPM certificates not found!" | tee -a "$LOG_FILE"
-    exit 1
-fi
-
-# Backup current mailcow certificates
-cp "$MAILCOW_CERT" "${MAILCOW_CERT}.bak-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
-cp "$MAILCOW_KEY" "${MAILCOW_KEY}.bak-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
-
-# Copy new certificates
-cp "$NPM_CERT" "$MAILCOW_CERT"
-cp "$NPM_KEY" "$MAILCOW_KEY"
-
-echo "[$(date)] Certificates copied successfully" | tee -a "$LOG_FILE"
-
-# Restart mailcow services that use SSL
-cd /opt/mailcow-dockerized
-docker restart mailcowdockerized-dovecot-mailcow-1 \
-               mailcowdockerized-postfix-mailcow-1 \
-               mailcowdockerized-nginx-mailcow-1
-
-echo "[$(date)] Mailcow services restarted" | tee -a "$LOG_FILE"
-
-# Wait for services to fully restart
-sleep 5
-
-# Update TLSA records in Cloudflare
-echo "[$(date)] Updating TLSA records in Cloudflare..." | tee -a "$LOG_FILE"
-if [ -f "/opt/mailcow-dockerized/update-tlsa-cloudflare.sh" ]; then
-    if /opt/mailcow-dockerized/update-tlsa-cloudflare.sh; then
-        echo "[$(date)] TLSA records updated successfully!" | tee -a "$LOG_FILE"
-    else
-        echo "[$(date)] WARNING: TLSA update failed! Check /var/log/tlsa-update.log" | tee -a "$LOG_FILE"
-        echo "[$(date)] You may need to update TLSA records manually" | tee -a "$LOG_FILE"
-    fi
-else
-    echo "[$(date)] WARNING: TLSA update script not found at /opt/mailcow-dockerized/update-tlsa-cloudflare.sh" | tee -a "$LOG_FILE"
-    echo "[$(date)] Please update TLSA records manually" | tee -a "$LOG_FILE"
-fi
-
-echo "[$(date)] Certificate sync completed successfully!" | tee -a "$LOG_FILE"
+**Cron entry:**
+```
+0 4 * * * flock -n /tmp/cert-sync.lock /opt/server-manager/scripts/sync-mailcow-certs.sh >> /opt/server-manager/logs/cert-sync-cron.log 2>&1
 ```
 
-**Make executable:**
-```bash
-chmod +x /root/nginx/letsencrypt/renewal-hooks/deploy/sync-mailcow-certs.sh
-```
+**Note:** Since Let's Encrypt renews ~30 days before expiry, both the old and new certificates
+are valid during the overlap window, so the daily check frequency is sufficient.
 
 ### 4.4 Manual Certificate Sync
 
 To manually sync certificates:
 ```bash
-/root/nginx/letsencrypt/renewal-hooks/deploy/sync-mailcow-certs.sh
+/opt/server-manager/scripts/sync-mailcow-certs.sh
 ```
 
 Check logs:
@@ -688,17 +635,15 @@ tail -f /var/log/tlsa-update.log
 
 ### 6.3 Integration with Certificate Renewal
 
-The TLSA update script is automatically called by the certificate renewal hook (see Section 4.3).
+The TLSA update script can be run after the certificate sync script (see Section 4.3).
 
 **Test the full automation:**
 ```bash
 # Manually run the certificate sync script
-/root/nginx/letsencrypt/renewal-hooks/deploy/sync-mailcow-certs.sh
+/opt/server-manager/scripts/sync-mailcow-certs.sh
 
-# This will:
-# 1. Sync certificates to mailcow
-# 2. Restart mail services
-# 3. Update TLSA records automatically
+# Then update TLSA records
+/opt/mailcow-dockerized/update-tlsa-cloudflare.sh
 ```
 
 ### 6.4 Verification
@@ -968,8 +913,8 @@ dig +dnssec villaherrgard.com
 ### 11.1 Automated Tasks
 
 **Certificate Renewal:**
-- NPM automatically renews Let's Encrypt certificates every ~60 days
-- Renewal hook automatically syncs to mailcow and updates TLSA records
+- NPM automatically renews Let's Encrypt certificates ~30 days before expiry
+- Host-side cron job syncs renewed cert to Mailcow daily at 04:00
 - No manual intervention required
 
 **TLSA Record Updates:**
@@ -1008,7 +953,6 @@ cd /opt/mailcow-dockerized
 /opt/mailcow-dockerized/data/conf/
 /opt/mailcow-dockerized/data/assets/ssl/
 /opt/mailcow-dockerized/update-tlsa-cloudflare.sh
-/root/nginx/letsencrypt/renewal-hooks/deploy/
 /root/nginx/data/
 ```
 
@@ -1040,24 +984,18 @@ docker-compose logs -f --tail=50 nginx-mailcow
 
 ### 12.1 Certificate Issues
 
-**Problem:** Mailcow services fail after certificate renewal
+**Problem:** Mailcow services have an expired or mismatched certificate
 
 **Solution:**
 ```bash
 # Check certificate validity
 openssl x509 -in /opt/mailcow-dockerized/data/assets/ssl/cert.pem -noout -dates -subject
 
-# Manually sync from NPM
-/root/nginx/letsencrypt/renewal-hooks/deploy/sync-mailcow-certs.sh
+# Manually sync from NPM (detects mismatch, copies, restarts, verifies)
+/opt/server-manager/scripts/sync-mailcow-certs.sh
 
 # Check logs
 tail -50 /var/log/mailcow-cert-sync.log
-
-# Restart mailcow services
-cd /opt/mailcow-dockerized
-docker restart mailcowdockerized-dovecot-mailcow-1 \
-               mailcowdockerized-postfix-mailcow-1 \
-               mailcowdockerized-nginx-mailcow-1
 ```
 
 ### 12.2 TLSA Record Mismatch
@@ -1221,7 +1159,7 @@ openssl x509 -in /opt/mailcow-dockerized/data/assets/ssl/cert.pem -noout -pubkey
     openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | xxd -p -c 64
 
 # Manually sync certificates
-/root/nginx/letsencrypt/renewal-hooks/deploy/sync-mailcow-certs.sh
+/opt/server-manager/scripts/sync-mailcow-certs.sh
 
 # Update TLSA records
 /opt/mailcow-dockerized/update-tlsa-cloudflare.sh
@@ -1311,13 +1249,10 @@ curl https://mta-sts.villaherrgard.com/.well-known/mta-sts.txt
 │           ├── 14.conf                  # mta-sts.villaherrgard.com
 │           └── ...
 └── letsencrypt/
-    ├── live/
-    │   └── npm-2/                       # Active certificate
-    │       ├── fullchain.pem
-    │       └── privkey.pem
-    └── renewal-hooks/
-        └── deploy/
-            └── sync-mailcow-certs.sh    # Certificate sync script
+    └── live/
+        └── npm-2/                       # Active certificate
+            ├── fullchain.pem
+            └── privkey.pem
 ```
 
 ### Log Files
@@ -1376,6 +1311,7 @@ curl https://mta-sts.villaherrgard.com/.well-known/mta-sts.txt
 | 1.0 | 2026-01-06 | Initial documentation |
 | 1.1 | 2026-01-10 | Added TLSA automation |
 | 1.2 | 2026-01-11 | Added SRV records, combined certificate, Chrome warning notes |
+| 1.3 | 2026-04-12 | Replaced broken in-container deploy hook with host-side cron sync script |
 
 ---
 
