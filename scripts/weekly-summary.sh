@@ -21,9 +21,18 @@ STALE_HOURS=48
 status_class() {
     case "$1" in
         OK)                          echo "ok" ;;
-        STALE|"RENEW SOON")         echo "warn" ;;
-        EXPIRING|DEGRADED*|NONE|"NO LOG") echo "error" ;;
+        STALE|"RENEW SOON"|"RENEWAL OVERDUE") echo "warn" ;;
+        EXPIRING|DEGRADED*|NONE|"NO LOG"|MISMATCH|"NO DNSSEC"|UNREACHABLE) echo "error" ;;
         *)                           echo "" ;;
+    esac
+}
+
+# Worst-case status across all sections; subject line picks up "ALERT" if any section sets this to "error"
+OVERALL_STATUS="ok"
+bump_status() {
+    case "$1" in
+        error) OVERALL_STATUS="error" ;;
+        warn)  [ "$OVERALL_STATUS" = "ok" ] && OVERALL_STATUS="warn" ;;
     esac
 }
 
@@ -202,6 +211,10 @@ ${rows}
 </table>"
 }
 
+# Populated by collect_tls(); consumed by collect_cert_renewal()
+RENEWED_CERTS=()
+RENEWAL_WINDOW_DAYS=7
+
 collect_tls() {
     local rows=""
 
@@ -210,6 +223,7 @@ collect_tls() {
 <table>
 <tr><td>Certificate directory not found</td></tr>
 </table>"
+        bump_status error
         return
     fi
 
@@ -219,35 +233,233 @@ collect_tls() {
     for cert_path in "$CERT_DIR"/npm-*/cert.pem; do
         [ -f "$cert_path" ] || continue
 
-        local cn expiry_str expiry_epoch days_left status
+        local cn not_after_str not_before_str
+        local not_after_epoch not_before_epoch days_left age_days status display_after
 
         cn=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null | sed 's/.*CN = //')
-        expiry_str=$(openssl x509 -in "$cert_path" -noout -enddate 2>/dev/null | sed 's/notAfter=//')
-        expiry_epoch=$(date -d "$expiry_str" +%s 2>/dev/null || echo "0")
-        days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
+        not_after_str=$(openssl x509 -in "$cert_path" -noout -enddate 2>/dev/null | sed 's/notAfter=//')
+        not_before_str=$(openssl x509 -in "$cert_path" -noout -startdate 2>/dev/null | sed 's/notBefore=//')
+        not_after_epoch=$(date -d "$not_after_str" +%s 2>/dev/null || echo "0")
+        not_before_epoch=$(date -d "$not_before_str" +%s 2>/dev/null || echo "0")
+        days_left=$(( (not_after_epoch - now_epoch) / 86400 ))
+        age_days=$(( (now_epoch - not_before_epoch) / 86400 ))
+        display_after=$(date -d "$not_after_str" '+%Y-%m-%d' 2>/dev/null || echo "$not_after_str")
 
+        # Status logic:
+        # ≤ 7 days        -> EXPIRING (red)        regardless of age
+        # ≤ 25 days, old  -> RENEWAL OVERDUE (orange)  cert >65d old, NPM should have renewed
+        # ≤ 25 days, new  -> OK (green)            cert <=65d old, mid-cycle, no action
+        # > 25 days       -> OK (green)
         if [ "$days_left" -lt 7 ]; then
             status="EXPIRING"
-        elif [ "$days_left" -lt 14 ]; then
-            status="RENEW SOON"
+        elif [ "$days_left" -le 25 ] && [ "$age_days" -gt 65 ]; then
+            status="RENEWAL OVERDUE"
         else
             status="OK"
         fi
 
         local cls
         cls=$(status_class "$status")
-        rows+="<tr><td>${cn}</td><td>${days_left} days</td><td class=\"${cls}\">${status}</td></tr>"
+        bump_status "$cls"
+        rows+="<tr><td>${cn}</td><td>${display_after}</td><td>${days_left} days</td><td class=\"${cls}\">${status}</td></tr>"
+
+        # Track recent renewals for the conditional renewal-detail block
+        if [ "$age_days" -lt "$RENEWAL_WINDOW_DAYS" ]; then
+            RENEWED_CERTS+=("$cert_path")
+        fi
     done
 
     if [ -z "$rows" ]; then
-        rows="<tr><td colspan=\"3\">No certificates found</td></tr>"
+        rows="<tr><td colspan=\"4\">No certificates found</td></tr>"
+        bump_status error
     fi
 
     SECTION_TLS="<h2>TLS Certificates</h2>
 <table>
-<tr><th>Domain</th><th>Expires</th><th>Status</th></tr>
+<tr><th>Domain</th><th>notAfter</th><th>Days left</th><th>Status</th></tr>
 ${rows}
 </table>"
+}
+
+# DANE/TLSA. The MX cert and TLSA record are shared by all four mail domains
+# (they all MX to mail.villaherrgard.com), so a single check covers everyone.
+MX_HOST="mail.villaherrgard.com"
+
+collect_dane() {
+    local live_spki tlsa_raw tlsa_hash tlsa_ttl ad_flag
+    local match_status match_cls dnssec_status dnssec_cls ttl_display
+
+    live_spki=$(timeout 5 bash -c "echo | openssl s_client -connect ${MX_HOST}:25 -starttls smtp -servername ${MX_HOST} 2>/dev/null \
+        | openssl x509 -noout -pubkey 2>/dev/null \
+        | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | awk '{print \$1}'")
+
+    if [ -z "$live_spki" ]; then
+        live_spki="(unreachable)"
+    fi
+
+    # Published TLSA + TTL via authoritative resolver
+    tlsa_raw=$(timeout 5 dig +short TLSA "_25._tcp.${MX_HOST}" @1.1.1.1 2>/dev/null | head -1)
+    tlsa_hash=$(echo "$tlsa_raw" | awk '{$1=$2=$3=""; print tolower($0)}' | tr -d ' ')
+    tlsa_ttl=$(timeout 5 dig +noall +answer TLSA "_25._tcp.${MX_HOST}" @1.1.1.1 2>/dev/null | awk '{print $2}' | head -1)
+    ad_flag=$(timeout 5 dig +dnssec +adflag TLSA "_25._tcp.${MX_HOST}" @1.1.1.1 +noall +comments 2>/dev/null \
+        | grep -oE "flags: [a-z ]+" | head -1)
+
+    if [ -z "$tlsa_hash" ]; then
+        match_status="UNREACHABLE"
+        tlsa_hash="(no answer)"
+    elif [ "$tlsa_hash" = "$live_spki" ]; then
+        match_status="OK"
+    else
+        match_status="MISMATCH"
+    fi
+    match_cls=$(status_class "$match_status")
+    bump_status "$match_cls"
+
+    if echo "$ad_flag" | grep -q " ad"; then
+        dnssec_status="OK"
+    else
+        dnssec_status="NO DNSSEC"
+    fi
+    dnssec_cls=$(status_class "$dnssec_status")
+    bump_status "$dnssec_cls"
+
+    ttl_display="${tlsa_ttl:-?}s"
+
+    SECTION_DANE="<h2>DANE / TLSA (${MX_HOST})</h2>
+<table>
+$(html_kv_row 'Live cert SPKI (port 25)' "<code>${live_spki}</code>")
+$(html_kv_row 'Published TLSA hash' "<code>${tlsa_hash}</code>")
+$(html_kv_row 'Match' "$match_status" "$match_cls")
+$(html_kv_row 'DNSSEC' "$dnssec_status" "$dnssec_cls")
+$(html_kv_row 'TTL' "$ttl_display")
+</table>"
+}
+
+# MTA-STS. Check the policy's mode + max_age + id for each mail domain.
+MAIL_DOMAINS="villaherrgard.com nysattra.se villaherrgard.se"
+
+collect_mtasts() {
+    local rows=""
+
+    for d in $MAIL_DOMAINS; do
+        local policy mode max_age max_age_days policy_id status cls
+
+        policy=$(timeout 5 curl -fsS --max-time 5 "https://mta-sts.${d}/.well-known/mta-sts.txt" 2>/dev/null || true)
+
+        if [ -z "$policy" ]; then
+            status="UNREACHABLE"
+            cls=$(status_class "$status")
+            bump_status "$cls"
+            rows+="<tr><td>${d}</td><td>—</td><td>—</td><td>—</td><td class=\"${cls}\">${status}</td></tr>"
+            continue
+        fi
+
+        mode=$(echo "$policy" | awk -F': *' '/^mode:/ {print $2}' | tr -d '\r')
+        max_age=$(echo "$policy" | awk -F': *' '/^max_age:/ {print $2}' | tr -d '\r')
+        max_age_days=$(( ${max_age:-0} / 86400 ))
+        policy_id=$(timeout 5 dig +short TXT "_mta-sts.${d}" @1.1.1.1 2>/dev/null \
+            | tr -d '"' | grep -oE 'id=[^;]+' | head -1 | sed 's/id=//')
+
+        if [ "$mode" = "enforce" ]; then
+            status="OK"
+        else
+            status="NOT ENFORCING"
+        fi
+        cls=$(status_class "$status")
+        # NOT ENFORCING isn't in status_class — treat as warn manually
+        if [ "$status" = "NOT ENFORCING" ]; then
+            cls="warn"
+            bump_status warn
+        fi
+        bump_status "$cls"
+
+        rows+="<tr><td>${d}</td><td>${mode}</td><td>${policy_id:-?}</td><td>${max_age_days} days</td><td class=\"${cls}\">${status}</td></tr>"
+    done
+
+    SECTION_MTASTS="<h2>MTA-STS</h2>
+<table>
+<tr><th>Domain</th><th>Mode</th><th>Policy ID</th><th>max_age</th><th>Status</th></tr>
+${rows}
+</table>"
+}
+
+# Renewal detail block: only renders when at least one cert was renewed within
+# the last RENEWAL_WINDOW_DAYS days. Populated by collect_tls() into RENEWED_CERTS.
+SECTION_RENEWAL=""
+SYNC_LOG="/var/log/mailcow-cert-sync.log"
+
+collect_cert_renewal() {
+    if [ ${#RENEWED_CERTS[@]} -eq 0 ]; then
+        return
+    fi
+
+    local blocks=""
+
+    for cert_path in "${RENEWED_CERTS[@]}"; do
+        local cn not_before_str not_after_str fingerprint
+        local mailcow_line tlsa_line live_match_line
+
+        cn=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null | sed 's/.*CN = //')
+        not_before_str=$(openssl x509 -in "$cert_path" -noout -startdate 2>/dev/null | sed 's/notBefore=//')
+        not_after_str=$(openssl x509 -in "$cert_path" -noout -enddate 2>/dev/null | sed 's/notAfter=//')
+        fingerprint=$(openssl x509 -in "$cert_path" -noout -fingerprint -sha256 2>/dev/null \
+            | sed -E "s/^[Ss][Hh][Aa]256 Fingerprint=//")
+
+        local extras=""
+
+        # Mail-cert-specific lines: Mailcow restart + TLSA rotation outcome + live port-25 verification
+        if [[ "$cn" == "*.villaherrgard.com" ]]; then
+            mailcow_line="(no recent log entry)"
+            tlsa_line="(no recent log entry)"
+
+            if [ -f "$SYNC_LOG" ]; then
+                local recent_block
+                # Last "Certificate change detected" run and everything after
+                recent_block=$(tac "$SYNC_LOG" 2>/dev/null \
+                    | awk '/Certificate change detected/{print; exit} {print}' \
+                    | tac)
+
+                if echo "$recent_block" | grep -q "Mailcow services restarted"; then
+                    mailcow_line=$(echo "$recent_block" | grep "Mailcow services restarted" | tail -1 | sed 's/^\[\([^]]*\)\].*/✓ restarted at \1/')
+                fi
+
+                if echo "$recent_block" | grep -q "TLSA rotated successfully"; then
+                    tlsa_line=$(echo "$recent_block" | grep "TLSA rotated successfully" | tail -1 | sed 's/^\[\([^]]*\)\].*/✓ rotated at \1/')
+                elif echo "$recent_block" | grep -q "TLSA already matches"; then
+                    tlsa_line="✓ already in sync (no rotation needed)"
+                elif echo "$recent_block" | grep -q "TLSA rotation failed"; then
+                    tlsa_line="✗ rotation FAILED — DANE delivery will break"
+                fi
+            fi
+
+            # Live port-25 verification: does live cert match the NPM file?
+            local live_fp file_fp
+            file_fp=$(openssl x509 -in "$cert_path" -noout -fingerprint -sha256 2>/dev/null | sed -E "s/^[Ss][Hh][Aa]256 Fingerprint=//")
+            live_fp=$(timeout 5 bash -c "echo | openssl s_client -connect ${MX_HOST}:25 -starttls smtp -servername ${MX_HOST} 2>/dev/null \
+                | openssl x509 -noout -fingerprint -sha256 2>/dev/null" | sed -E 's/^[Ss][Hh][Aa]256 Fingerprint=//')
+
+            if [ -n "$live_fp" ] && [ "$live_fp" = "$file_fp" ]; then
+                live_match_line="✓ port 25 serves new cert"
+            else
+                live_match_line="✗ port 25 not serving new cert (file: ${file_fp:0:24}…, live: ${live_fp:0:24}…)"
+            fi
+
+            extras="
+$(html_kv_row 'Mailcow restart' "$mailcow_line")
+$(html_kv_row 'TLSA rotation' "$tlsa_line")
+$(html_kv_row 'Port 25' "$live_match_line")"
+        fi
+
+        blocks+="<h3 style=\"margin-top:18px;font-size:13px;color:#2c3e50;\">${cn} renewed within last ${RENEWAL_WINDOW_DAYS} days</h3>
+<table>
+$(html_kv_row 'notBefore' "$not_before_str")
+$(html_kv_row 'notAfter' "$not_after_str")
+$(html_kv_row 'Fingerprint' "<code style=\"font-size:11px;\">${fingerprint}</code>")${extras}
+</table>"
+    done
+
+    SECTION_RENEWAL="<h2>Cert Renewal — Last ${RENEWAL_WINDOW_DAYS} Days</h2>
+${blocks}"
 }
 
 collect_docker() {
@@ -298,12 +510,24 @@ collect_security
 collect_mail
 collect_backups
 collect_tls
+collect_dane
+collect_mtasts
+collect_cert_renewal
 collect_docker
+
+# Compose subject: append "- ALERT" first if any red status, then "+ Cert Renewal" if a renewal happened
+SUBJECT="[VPS Summary] Weekly Health Report — ${HOSTNAME} (${DATE})"
+if [ "$OVERALL_STATUS" = "error" ]; then
+    SUBJECT="[VPS Summary - ALERT] Weekly Health Report — ${HOSTNAME} (${DATE})"
+fi
+if [ -n "$SECTION_RENEWAL" ]; then
+    SUBJECT="${SUBJECT} + Cert Renewal"
+fi
 
 msmtp -t <<EOF
 To: ${ALERT_EMAIL}
 From: ${FROM_NAME} <root@villaherrgard.com>
-Subject: [VPS Summary] Weekly Health Report — ${HOSTNAME} (${DATE})
+Subject: ${SUBJECT}
 MIME-Version: 1.0
 Content-Type: text/html; charset=utf-8
 
@@ -342,6 +566,9 @@ ${SECTION_SECURITY}
 ${SECTION_MAIL}
 ${SECTION_BACKUPS}
 ${SECTION_TLS}
+${SECTION_DANE}
+${SECTION_MTASTS}
+${SECTION_RENEWAL}
 ${SECTION_DOCKER}
 </div>
 <div class="footer">

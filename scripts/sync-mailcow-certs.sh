@@ -20,6 +20,12 @@ NPM_KEY="/root/nginx/letsencrypt/live/npm-2/privkey.pem"
 MC_CERT="/opt/mailcow-dockerized/data/assets/ssl/cert.pem"
 MC_KEY="/opt/mailcow-dockerized/data/assets/ssl/key.pem"
 
+# DANE/TLSA: all four mail domains MX to mail.villaherrgard.com,
+# so a single TLSA record (3 1 1, SPKI sha256) protects all of them.
+# Hosted in Cloudflare, rotated via API when the cert public key changes.
+CREDENTIALS_FILE="/root/.credentials.env"
+TLSA_RECORD_NAME="_25._tcp.mail.villaherrgard.com"
+
 MC_SERVICES=(
     mailcowdockerized-dovecot-mailcow-1
     mailcowdockerized-postfix-mailcow-1
@@ -82,20 +88,85 @@ served_fp=$(echo | openssl s_client -connect localhost:993 -servername mail.vill
 
 if [ "$served_fp" = "$npm_fp" ]; then
     log "Verified: IMAP now serving the new certificate"
+    cert_status="OK: IMAP fingerprint matches."
+else
+    log "WARNING: IMAP fingerprint does not match after restart"
+    cert_status="WARN: IMAP fingerprint mismatch.
+Expected: ${npm_fp}
+Got:      ${served_fp}"
+fi
+
+# Rotate DANE/TLSA record so Microsoft (and other DANE-enforcing receivers)
+# don't reject mail after a key rotation. Mailcow renewals can change the
+# public key, which invalidates the previously published 3 1 1 SPKI hash.
+tlsa_status="SKIPPED"
+if [ -f "$CREDENTIALS_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$CREDENTIALS_FILE"
+fi
+
+if [ -n "${CF_API_TOKEN:-}" ] && [ -n "${CF_ZONE_ID:-}" ]; then
+    new_spki=$(openssl x509 -in "$NPM_CERT" -noout -pubkey \
+        | openssl pkey -pubin -outform DER 2>/dev/null \
+        | sha256sum | awk '{print $1}')
+
+    cf_response=$(curl -fsS -G "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" \
+        -H "Authorization: Bearer ${CF_API_TOKEN}" \
+        --data-urlencode "type=TLSA" \
+        --data-urlencode "name=${TLSA_RECORD_NAME}" 2>/dev/null) || cf_response=""
+
+    record_id=$(echo "$cf_response" | python3 -c \
+        'import json,sys; d=json.load(sys.stdin); r=d.get("result",[]); print(r[0]["id"] if r else "")' 2>/dev/null)
+    current_spki=$(echo "$cf_response" | python3 -c \
+        'import json,sys; d=json.load(sys.stdin); r=d.get("result",[]); print(r[0]["data"]["certificate"] if r else "")' 2>/dev/null)
+
+    if [ -z "$record_id" ]; then
+        log "WARNING: TLSA record ${TLSA_RECORD_NAME} not found in Cloudflare zone"
+        tlsa_status="WARN: TLSA record not found in Cloudflare"
+    elif [ "$current_spki" = "$new_spki" ]; then
+        log "TLSA already matches new SPKI -- no rotation needed"
+        tlsa_status="OK: TLSA already matches (${new_spki:0:16}...)"
+    else
+        log "Rotating TLSA: ${current_spki:0:16}... -> ${new_spki:0:16}..."
+        patch_payload=$(python3 -c \
+            'import json,sys; print(json.dumps({"data":{"usage":3,"selector":1,"matching_type":1,"certificate":sys.argv[1]},"comment":"Mailcow mail server (auto-rotated)"}))' \
+            "$new_spki")
+
+        if curl -fsS -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${record_id}" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "$patch_payload" >/dev/null 2>&1; then
+            log "TLSA rotated successfully"
+            tlsa_status="OK: TLSA rotated to ${new_spki:0:16}..."
+        else
+            log "ERROR: TLSA rotation failed (Cloudflare API error)"
+            tlsa_status="ERROR: TLSA rotation failed -- DANE delivery will break"
+        fi
+    fi
+else
+    log "WARNING: CF_API_TOKEN/CF_ZONE_ID not set, skipping TLSA rotation"
+    tlsa_status="SKIPPED: Cloudflare credentials not available"
+fi
+
+# Single consolidated notification covering both cert sync and TLSA rotation
+if [[ "$cert_status" == OK* && "$tlsa_status" == OK* ]]; then
     notify "[VPS OK] Mailcow certificate synced" \
         "New wildcard certificate synced to Mailcow at $(date '+%Y-%m-%d %H:%M:%S').
 
 New cert expires: ${npm_expiry}
 
 Services restarted: ${MC_SERVICES[*]}
-Verification: IMAP fingerprint matches."
+
+Cert sync: ${cert_status}
+TLSA:      ${tlsa_status}"
 else
-    log "WARNING: IMAP fingerprint does not match after restart"
-    notify "[VPS ALERT] Mailcow cert sync - verification failed" \
-        "Certificate was copied and services restarted, but IMAP is not serving the expected certificate.
+    notify "[VPS ALERT] Mailcow cert sync needs attention" \
+        "Certificate sync ran at $(date '+%Y-%m-%d %H:%M:%S') but at least one step did not succeed cleanly.
 
-Expected: ${npm_fp}
-Got:      ${served_fp}
+New cert expires: ${npm_expiry}
 
-Manual investigation required."
+Cert sync: ${cert_status}
+TLSA:      ${tlsa_status}
+
+Manual investigation may be required."
 fi
