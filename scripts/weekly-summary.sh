@@ -462,6 +462,42 @@ $(html_kv_row 'Fingerprint' "<code style=\"font-size:11px;\">${fingerprint}</cod
 ${blocks}"
 }
 
+# Mail reports: scan postmaster mailbox for TLS-RPT + DMARC, render summary,
+# move processed → Processed/, purge >180d. Output begins with a STATUS comment
+# (<!-- STATUS=ok|warn|error -->) which we parse to drive bump_status.
+SECTION_MAIL_REPORTS=""
+MAIL_REPORTS_SCAN_DAYS=7
+MAIL_REPORTS_RETENTION_DAYS=180
+MAIL_REPORTS_USER="postmaster@villaherrgard.com"
+
+collect_mail_reports() {
+    local raw status_line status_cls
+
+    raw=$(/opt/server-manager/scripts/scan-mail-reports.py \
+        --days "$MAIL_REPORTS_SCAN_DAYS" \
+        --user "$MAIL_REPORTS_USER" \
+        --type both \
+        --format html \
+        --move-processed \
+        --purge-older-than "$MAIL_REPORTS_RETENTION_DAYS" \
+        2>>/var/log/mail-reports-scan.log) || raw=""
+
+    if [ -z "$raw" ]; then
+        SECTION_MAIL_REPORTS="<h2>Mail Reports (${MAIL_REPORTS_SCAN_DAYS}d)</h2>
+<table><tr><td class=\"value error\">Scanner failed — see /var/log/mail-reports-scan.log</td></tr></table>"
+        bump_status error
+        return
+    fi
+
+    # Extract status from leading "<!-- STATUS=xxx -->" comment
+    status_line=$(echo "$raw" | grep -oE "STATUS=(ok|warn|error)" | head -1)
+    status_cls="${status_line#STATUS=}"
+    [ -n "$status_cls" ] && bump_status "$status_cls"
+
+    # Strip the STATUS comment from the rendered HTML (it's metadata, not content)
+    SECTION_MAIL_REPORTS=$(echo "$raw" | sed '/<!-- STATUS=/d')
+}
+
 collect_docker() {
     local running restart_rows=""
 
@@ -513,6 +549,7 @@ collect_tls
 collect_dane
 collect_mtasts
 collect_cert_renewal
+collect_mail_reports
 collect_docker
 
 # Compose subject: append "- ALERT" first if any red status, then "+ Cert Renewal" if a renewal happened
@@ -569,6 +606,7 @@ ${SECTION_TLS}
 ${SECTION_DANE}
 ${SECTION_MTASTS}
 ${SECTION_RENEWAL}
+${SECTION_MAIL_REPORTS}
 ${SECTION_DOCKER}
 </div>
 <div class="footer">
