@@ -326,24 +326,13 @@ class RestoreManager:
             logger.error("Insufficient disk space for restore")
             return False
 
-        # Backup existing installation
-        if os.path.exists(nginx_path):
-            self._stop_service(nginx_path)
-            backup_path = self._backup_existing_installation(nginx_path, 'nginx')
-
-            if backup_path:
-                logger.info(f"Existing installation saved to: {backup_path}")
-
-            # Remove existing installation
-            logger.info(f"Removing existing installation: {nginx_path}")
-            shutil.rmtree(nginx_path)
-
         # Create temporary extraction directory
         temp_dir = os.path.join(self.local_staging, f'restore-nginx-{datetime.now().strftime("%Y%m%d_%H%M%S")}')
         ensure_directory(temp_dir)
 
         try:
-            # Extract backup
+            # Extract backup FIRST, while the live installation is untouched.
+            # If extraction fails we abort with the running service intact.
             if not self._extract_backup(repo, selected_backup, temp_dir):
                 return False
 
@@ -353,6 +342,23 @@ class RestoreManager:
             if not os.path.exists(extracted_nginx):
                 logger.error(f"nginx directory not found in backup: {extracted_nginx}")
                 return False
+
+            # Extraction verified — now stop the service and swap
+            if os.path.exists(nginx_path):
+                self._stop_service(nginx_path)
+                backup_path = self._backup_existing_installation(nginx_path, 'nginx')
+
+                if backup_path is None:
+                    # Safety copy failed — do NOT delete the live installation
+                    logger.error("Pre-restore safety copy failed — aborting restore")
+                    self._start_service(nginx_path)
+                    return False
+
+                logger.info(f"Existing installation saved to: {backup_path}")
+
+                # Remove existing installation
+                logger.info(f"Removing existing installation: {nginx_path}")
+                shutil.rmtree(nginx_path)
 
             # Move to target location
             logger.info(f"Moving nginx installation to: {nginx_path}")
@@ -424,8 +430,13 @@ class RestoreManager:
             self._stop_service(mailcow_path)
             backup_path = self._backup_existing_installation(mailcow_path, 'mailcow')
 
-            if backup_path:
-                logger.info(f"Existing installation saved to: {backup_path}")
+            if backup_path is None:
+                # Safety copy failed — don't let the restore script overwrite live data
+                logger.error("Pre-restore safety copy failed — aborting restore")
+                self._start_service(mailcow_path)
+                return False
+
+            logger.info(f"Existing installation saved to: {backup_path}")
 
         # Create temporary extraction directory
         temp_dir = os.path.join(self.local_staging, f'restore-mailcow-{datetime.now().strftime("%Y%m%d_%H%M%S")}')
@@ -597,21 +608,6 @@ class RestoreManager:
             logger.error("Insufficient disk space for restore")
             return False
 
-        # Backup existing installation if it exists
-        if os.path.exists(mailcow_path):
-            # Stop mailcow services first
-            logger.info("Stopping Mailcow services...")
-            self._stop_service(mailcow_path)
-
-            # Backup existing directory
-            backup_path = self._backup_existing_installation(mailcow_path, 'mailcow-directory')
-            if backup_path:
-                logger.info(f"Existing installation saved to: {backup_path}")
-
-            # Remove existing installation
-            logger.info(f"Removing existing installation: {mailcow_path}")
-            shutil.rmtree(mailcow_path)
-
         # Create temporary extraction directory
         temp_dir = os.path.join(
             self.local_staging,
@@ -620,7 +616,8 @@ class RestoreManager:
         ensure_directory(temp_dir)
 
         try:
-            # Extract backup
+            # Extract backup FIRST, while the live installation is untouched.
+            # If extraction fails we abort with the running service intact.
             if not self._extract_backup(repo, selected_backup, temp_dir):
                 return False
 
@@ -630,6 +627,25 @@ class RestoreManager:
             if not os.path.exists(extracted_mailcow):
                 logger.error(f"Mailcow directory not found in backup: {extracted_mailcow}")
                 return False
+
+            # Extraction verified — now stop the service and swap
+            if os.path.exists(mailcow_path):
+                logger.info("Stopping Mailcow services...")
+                self._stop_service(mailcow_path)
+
+                # Backup existing directory
+                backup_path = self._backup_existing_installation(mailcow_path, 'mailcow-directory')
+                if backup_path is None:
+                    # Safety copy failed — do NOT delete the live installation
+                    logger.error("Pre-restore safety copy failed — aborting restore")
+                    self._start_service(mailcow_path)
+                    return False
+
+                logger.info(f"Existing installation saved to: {backup_path}")
+
+                # Remove existing installation
+                logger.info(f"Removing existing installation: {mailcow_path}")
+                shutil.rmtree(mailcow_path)
 
             # Move to target location
             logger.info(f"Moving Mailcow directory to: {mailcow_path}")
