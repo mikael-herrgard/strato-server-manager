@@ -92,6 +92,89 @@ class BackupManager(BorgRepoBase):
         logger.info("Pre-backup checks passed")
         return True
 
+    def _finish_backup(
+        self,
+        service: str,
+        source_paths: List[str],
+        excludes: Optional[List[str]],
+        verify: bool
+    ) -> bool:
+        """
+        Shared tail of every backup: create archive, verify, prune.
+
+        Args:
+            service: Service name (determines repo and archive naming)
+            source_paths: Paths to include in the archive
+            excludes: Borg exclude patterns
+            verify: Verify archive after creation
+
+        Returns:
+            True if successful
+        """
+        repo = self._get_borg_repo(service)
+
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        archive_name = f"{self.hostname}-{service}-{timestamp}"
+
+        if not self._create_borg_backup(repo, archive_name, source_paths, excludes):
+            return False
+
+        if verify:
+            if not self.verify_backup(repo, archive_name):
+                logger.error("Backup verification failed")
+                return False
+
+        self.prune_old_backups(repo)
+
+        logger.info(f"{service} backup completed successfully")
+        return True
+
+    def _backup_service(
+        self,
+        service: str,
+        source_paths: List[str],
+        verify: bool = True,
+        excludes: Optional[List[str]] = None,
+        required_gb: int = 10,
+        skip_missing: bool = False
+    ) -> bool:
+        """
+        Generic backup flow for services that are plain paths on disk:
+        pre-checks -> validate sources -> create/verify/prune.
+
+        Args:
+            service: Service name
+            source_paths: Paths to back up
+            verify: Verify archive after creation
+            excludes: Borg exclude patterns
+            required_gb: Required staging disk space in GB
+            skip_missing: If True, missing paths are skipped with a
+                          warning (at least one must exist); if False,
+                          any missing path aborts the backup
+
+        Returns:
+            True if successful
+        """
+        logger.info(f"Starting {service} backup")
+
+        if not self._pre_backup_checks(service, required_gb=required_gb):
+            return False
+
+        if skip_missing:
+            existing = [p for p in source_paths if os.path.exists(p)]
+            for p in source_paths:
+                if p not in existing:
+                    logger.warning(f"Path not found, skipping: {p}")
+            if not existing:
+                return self._error(f"No source paths found for {service} backup")
+            source_paths = existing
+        else:
+            for p in source_paths:
+                if not os.path.exists(p):
+                    return self._error(f"{service} source path not found: {p}")
+
+        return self._finish_backup(service, source_paths, excludes, verify)
+
     def get_backup_info(self, repo: str, archive_name: str) -> Optional[Dict[str, str]]:
         """
         Get detailed information about a backup
@@ -126,56 +209,14 @@ class BackupManager(BorgRepoBase):
             return None
 
     def backup_nginx(self, verify: bool = True) -> bool:
-        """
-        Backup nginx Proxy Manager
-
-        Args:
-            verify: Verify backup after creation
-
-        Returns:
-            True if successful
-        """
-        logger.info("Starting nginx backup")
-
-        # Get configuration
-        nginx_path = self.nginx_config['install_path']
-        repo = self._get_borg_repo('nginx')
-
-        # Pre-backup checks
-        if not self._pre_backup_checks('nginx', required_gb=5):
-            return False
-
-        # Check if nginx directory exists
-        if not os.path.exists(nginx_path):
-            return self._error(f"nginx directory not found: {nginx_path}")
-
-        # Create archive name with timestamp
-        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        archive_name = f"{self.hostname}-nginx-{timestamp}"
-
-        # Exclude patterns (from your bash script)
-        excludes = [
-            '*.log',
-            '*/logs/*',
-            '*/.git/*',
-            '*/tmp/*'
-        ]
-
-        # Create backup
-        if not self._create_borg_backup(repo, archive_name, nginx_path, excludes):
-            return False
-
-        # Verify backup
-        if verify:
-            if not self.verify_backup(repo, archive_name):
-                logger.error("Backup verification failed")
-                return False
-
-        # Prune old backups
-        self.prune_old_backups(repo)
-
-        logger.info("nginx backup completed successfully")
-        return True
+        """Backup nginx Proxy Manager installation directory."""
+        return self._backup_service(
+            'nginx',
+            [self.nginx_config['install_path']],
+            verify=verify,
+            excludes=['*.log', '*/logs/*', '*/.git/*', '*/tmp/*'],
+            required_gb=5,
+        )
 
     def backup_mailcow(self, backup_type: str = "all", verify: bool = True) -> bool:
         """
@@ -242,24 +283,7 @@ class BackupManager(BorgRepoBase):
             logger.info(f"Mailcow backup created: {latest_backup}")
 
             # Now create Borg archive from this backup
-            timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            archive_name = f"{self.hostname}-mailcow-{timestamp}"
-            repo = self._get_borg_repo('mailcow')
-
-            if not self._create_borg_backup(repo, archive_name, latest_backup):
-                return False
-
-            # Verify backup
-            if verify:
-                if not self.verify_backup(repo, archive_name):
-                    logger.error("Backup verification failed")
-                    return False
-
-            # Prune old backups
-            self.prune_old_backups(repo)
-
-            logger.info("Mailcow backup completed successfully")
-            return True
+            return self._finish_backup('mailcow', [latest_backup], None, verify)
 
         except subprocess.CalledProcessError as e:
             stderr_tail = (e.stderr or '').strip()[-300:]
@@ -269,114 +293,33 @@ class BackupManager(BorgRepoBase):
 
     def backup_mailcow_directory(self, verify: bool = True) -> bool:
         """
-        Backup Mailcow installation directory (configuration and certificates)
-
-        This backs up /opt/mailcow-dockerized including:
-        - mailcow.conf
-        - docker-compose.yml and related files
-        - SSL certificates
-        - DKIM keys
-        - Configuration files
-
-        Args:
-            verify: Verify backup after creation
-
-        Returns:
-            True if successful
+        Backup Mailcow installation directory (mailcow.conf, compose
+        files, SSL certificates, DKIM keys).
         """
-        logger.info("Starting Mailcow directory backup")
-
-        # Get configuration
-        mailcow_path = self.mailcow_config['install_path']
-        repo = self._get_borg_repo('mailcow-directory')
-
-        # Pre-backup checks
-        if not self._pre_backup_checks('mailcow-directory', required_gb=5):
-            return False
-
-        # Check if mailcow directory exists
-        if not os.path.exists(mailcow_path):
-            return self._error(f"Mailcow directory not found: {mailcow_path}")
-
-        # Create archive name with timestamp
-        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        archive_name = f"{self.hostname}-mailcow-directory-{timestamp}"
-
-        # Exclude patterns - we don't need backups, logs, or temporary data
-        excludes = [
-            '*/backups/*',      # Old backup location (if any remain)
-            '*.log',            # Log files
-            '*/logs/*',         # Log directories
-            '*/.git/*',         # Git metadata
-            '*/tmp/*',          # Temporary files
-            '*/data/redis/*',   # Redis temporary data (regenerated)
-        ]
-
-        # Create backup
-        if not self._create_borg_backup(repo, archive_name, mailcow_path, excludes):
-            return False
-
-        # Verify backup
-        if verify:
-            if not self.verify_backup(repo, archive_name):
-                logger.error("Backup verification failed")
-                return False
-
-        # Prune old backups
-        self.prune_old_backups(repo)
-
-        logger.info("Mailcow directory backup completed successfully")
-        return True
+        return self._backup_service(
+            'mailcow-directory',
+            [self.mailcow_config['install_path']],
+            verify=verify,
+            excludes=[
+                '*/backups/*',      # Old backup location (if any remain)
+                '*.log',            # Log files
+                '*/logs/*',         # Log directories
+                '*/.git/*',         # Git metadata
+                '*/tmp/*',          # Temporary files
+                '*/data/redis/*',   # Redis temporary data (regenerated)
+            ],
+            required_gb=5,
+        )
 
     def backup_server_manager(self, verify: bool = True) -> bool:
-        """
-        Backup server-manager configuration files
-
-        This backs up /opt/server-manager/config/ including:
-        - settings.yaml
-        - notifications.yaml
-
-        Args:
-            verify: Verify backup after creation
-
-        Returns:
-            True if successful
-        """
-        logger.info("Starting server-manager config backup")
-
-        config_path = '/opt/server-manager/config'
-        repo = self._get_borg_repo('server-manager')
-
-        # Pre-backup checks
-        if not self._pre_backup_checks('server-manager', required_gb=1):
-            return False
-
-        if not os.path.exists(config_path):
-            return self._error(f"Config directory not found: {config_path}")
-
-        # Create archive name with timestamp
-        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        archive_name = f"{self.hostname}-server-manager-{timestamp}"
-
-        excludes = [
-            '*.example*',
-        ]
-
-        # Create backup
-        if not self._create_borg_backup(repo, archive_name, config_path, excludes):
-            return False
-
-        # Verify backup
-        if verify:
-            if not self.verify_backup(repo, archive_name):
-                logger.error("Backup verification failed")
-                return False
-
-        # Prune old backups
-        self.prune_old_backups(repo)
-
-        logger.info("Server-manager config backup completed successfully")
-        return True
+        """Backup server-manager config (settings.yaml, notifications.yaml)."""
+        return self._backup_service(
+            'server-manager',
+            ['/opt/server-manager/config'],
+            verify=verify,
+            excludes=['*.example*'],
+            required_gb=1,
+        )
 
     def backup_monitoring_stack(self, verify: bool = True) -> bool:
         """
@@ -396,7 +339,6 @@ class BackupManager(BorgRepoBase):
 
         # Get configuration
         monitoring_config = self.config.get_monitoring_stack_config()
-        repo = self._get_borg_repo('monitoring-stack')
 
         # Pre-backup checks
         if not self._pre_backup_checks('monitoring-stack', required_gb=1):
@@ -442,11 +384,6 @@ class BackupManager(BorgRepoBase):
                     else:
                         logger.warning(f"Failed to stop {svc}, continuing anyway")
 
-            # Create archive name with timestamp
-            timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            archive_name = f"{self.hostname}-monitoring-stack-{timestamp}"
-
-            # Exclude patterns
             excludes = [
                 '*/.git/*',
                 '*/__pycache__/*',
@@ -454,21 +391,7 @@ class BackupManager(BorgRepoBase):
                 '*/logs/*',
             ]
 
-            # Create backup
-            if not self._create_borg_backup(repo, archive_name, source_paths, excludes):
-                return False
-
-            # Verify backup
-            if verify:
-                if not self.verify_backup(repo, archive_name):
-                    logger.error("Backup verification failed")
-                    return False
-
-            # Prune old backups
-            self.prune_old_backups(repo)
-
-            logger.info("Monitoring stack backup completed successfully")
-            return True
+            return self._finish_backup('monitoring-stack', source_paths, excludes, verify)
 
         except Exception as e:
             return self._error(f"Monitoring stack backup failed: {e}")
@@ -486,55 +409,16 @@ class BackupManager(BorgRepoBase):
 
     def backup_credentials(self, verify: bool = True) -> bool:
         """
-        Backup centralized credentials files
-
-        Backs up /root/.credentials.env and /root/.dns-config to a dedicated
-        Borg repository. These are tiny files (~1KB) so the backup is very fast.
-
-        Args:
-            verify: Verify backup after creation
-
-        Returns:
-            True if successful
+        Backup centralized credentials files (/root/.credentials.env
+        and /root/.dns-config). Missing files are skipped with a warning.
         """
-        logger.info("Starting credentials backup")
-
-        repo = self._get_borg_repo('credentials')
-
-        # Pre-backup checks (minimal disk space needed)
-        if not self._pre_backup_checks('credentials', required_gb=1):
-            return False
-
-        # Collect source paths
-        source_paths = []
-        for path in ['/root/.credentials.env', '/root/.dns-config']:
-            if os.path.exists(path):
-                source_paths.append(path)
-            else:
-                logger.warning(f"Credentials file not found: {path}")
-
-        if not source_paths:
-            return self._error("No credentials files found to back up")
-
-        # Create archive name with timestamp
-        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        archive_name = f"{self.hostname}-credentials-{timestamp}"
-
-        # Create backup
-        if not self._create_borg_backup(repo, archive_name, source_paths):
-            return False
-
-        # Verify backup
-        if verify:
-            if not self.verify_backup(repo, archive_name):
-                logger.error("Backup verification failed")
-                return False
-
-        # Prune old backups
-        self.prune_old_backups(repo)
-
-        logger.info("Credentials backup completed successfully")
-        return True
+        return self._backup_service(
+            'credentials',
+            ['/root/.credentials.env', '/root/.dns-config'],
+            verify=verify,
+            required_gb=1,
+            skip_missing=True,
+        )
 
     def get_backup_status(self) -> Dict[str, any]:
         """

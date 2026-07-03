@@ -20,6 +20,12 @@ from lib.config import ConfigError
 
 LOG_FILE = "/opt/server-manager/logs/server-manager.log"
 
+SERVICES = ["nginx", "mailcow", "mailcow-directory", "server-manager", "monitoring-stack", "credentials"]
+
+# Service name -> manager method (backup_mailcow's backup_type defaults to "all")
+BACKUP_METHODS = {s: f"backup_{s.replace('-', '_')}" for s in SERVICES}
+RESTORE_METHODS = {s: f"restore_{s.replace('-', '_')}" for s in SERVICES}
+
 
 def get_log_tail(lines: int = 15) -> str:
     """Return the last N lines of the application log for failure notifications."""
@@ -41,21 +47,11 @@ def cmd_backup(args):
     start_time = datetime.now()
 
     try:
-        if service == "nginx":
-            success = backup_mgr.backup_nginx(verify=verify)
-        elif service == "mailcow":
-            success = backup_mgr.backup_mailcow(backup_type="all", verify=verify)
-        elif service == "mailcow-directory":
-            success = backup_mgr.backup_mailcow_directory(verify=verify)
-        elif service == "server-manager":
-            success = backup_mgr.backup_server_manager(verify=verify)
-        elif service == "monitoring-stack":
-            success = backup_mgr.backup_monitoring_stack(verify=verify)
-        elif service == "credentials":
-            success = backup_mgr.backup_credentials(verify=verify)
-        else:
+        method = BACKUP_METHODS.get(service)
+        if method is None:
             print(f"Error: Unknown service: {service}")
             sys.exit(1)
+        success = getattr(backup_mgr, method)(verify=verify)
 
         duration = (datetime.now() - start_time).total_seconds()
 
@@ -126,21 +122,11 @@ def cmd_restore(args):
     start_time = datetime.now()
 
     try:
-        if service == "nginx":
-            success = restore_mgr.restore_nginx(backup_name=archive)
-        elif service == "mailcow":
-            success = restore_mgr.restore_mailcow(backup_name=archive)
-        elif service == "mailcow-directory":
-            success = restore_mgr.restore_mailcow_directory(backup_name=archive)
-        elif service == "server-manager":
-            success = restore_mgr.restore_server_manager(backup_name=archive)
-        elif service == "monitoring-stack":
-            success = restore_mgr.restore_monitoring_stack(backup_name=archive)
-        elif service == "credentials":
-            success = restore_mgr.restore_credentials(backup_name=archive)
-        else:
+        method = RESTORE_METHODS.get(service)
+        if method is None:
             print(f"Error: Unknown service: {service}")
             sys.exit(1)
+        success = getattr(restore_mgr, method)(backup_name=archive)
 
         duration = (datetime.now() - start_time).total_seconds()
 
@@ -225,6 +211,46 @@ def cmd_restore_all(args):
         sys.exit(1)
 
 
+def cmd_check(args):
+    """Run borg check on backup repositories."""
+    service = args.service
+
+    backup_mgr = BackupManager()
+    notif_mgr = NotificationManager()
+
+    start_time = datetime.now()
+
+    if service == "all":
+        print("Checking integrity of all Borg repositories (this can take a while)...")
+        results = backup_mgr.check_all_repositories(timeout=args.timeout)
+    else:
+        print(f"Checking integrity of {service} repository...")
+        results = {service: backup_mgr.check_repository(service, timeout=args.timeout)}
+
+    duration = (datetime.now() - start_time).total_seconds()
+
+    failed = [s for s, ok in results.items() if not ok]
+    for svc, ok in results.items():
+        print(f"  [{'OK' if ok else 'FAILED'}] {svc}")
+    print(f"\n{len(results) - len(failed)}/{len(results)} repositories OK ({duration:.0f}s)")
+
+    if failed:
+        error_msg = backup_mgr.last_error or f"borg check failed for: {', '.join(failed)}"
+        details = {
+            'failed_repositories': ', '.join(failed),
+            'error': error_msg,
+            'duration': f"{duration:.0f} seconds",
+        }
+        log_tail = get_log_tail()
+        if log_tail:
+            details['log_tail'] = f"\n{log_tail}"
+        try:
+            notif_mgr.send_maintenance_notification("Borg Repository Check", False, details)
+        except Exception as ne:
+            print(f"Warning: Failed to send failure notification: {ne}")
+        sys.exit(1)
+
+
 def cmd_cleanup(args):
     """Clean up old pre-update, pre-restore, and rollback directories."""
     retention_days = args.retention_days
@@ -280,7 +306,7 @@ def main():
     backup_parser = subparsers.add_parser("backup", help="Run a backup")
     backup_parser.add_argument(
         "service",
-        choices=["nginx", "mailcow", "mailcow-directory", "server-manager", "monitoring-stack", "credentials"],
+        choices=SERVICES,
         help="Service to back up"
     )
     backup_parser.add_argument(
@@ -293,7 +319,7 @@ def main():
     restore_parser = subparsers.add_parser("restore", help="Restore a service from backup")
     restore_parser.add_argument(
         "service",
-        choices=["nginx", "mailcow", "mailcow-directory", "server-manager", "monitoring-stack", "credentials"],
+        choices=SERVICES,
         help="Service to restore"
     )
     restore_parser.add_argument(
@@ -319,6 +345,21 @@ def main():
         help="Skip confirmation prompt"
     )
     restore_all_parser.set_defaults(func=cmd_restore_all)
+
+    # check subcommand
+    check_parser = subparsers.add_parser(
+        "check", help="Verify Borg repository integrity (borg check)"
+    )
+    check_parser.add_argument(
+        "service", nargs="?", default="all",
+        choices=["all"] + SERVICES,
+        help="Repository to check (default: all)"
+    )
+    check_parser.add_argument(
+        "--timeout", type=int, default=3600,
+        help="Per-repository timeout in seconds (default: 3600)"
+    )
+    check_parser.set_defaults(func=cmd_check)
 
     # cleanup subcommand
     cleanup_parser = subparsers.add_parser("cleanup", help="Clean up old backups")
