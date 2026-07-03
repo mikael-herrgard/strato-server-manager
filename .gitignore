@@ -34,3 +34,8 @@ Thumbs.db
 
 # Backup staging
 /var/backups/local/
+
+# Local pre-restore / settings auto-backups (operational artifacts, not source)
+config.pre-restore.*/
+config/settings.yaml.backup.*
+config/notifications.yaml.backup.*
