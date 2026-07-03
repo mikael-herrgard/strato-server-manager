@@ -188,6 +188,9 @@ def test_ssh_connection(host: str, user: str = "root", key_path: Optional[str] =
     """
     Test SSH connection to remote host
 
+    Retries once on failure — remote backup providers (e.g. rsync.net)
+    occasionally stall for many seconds on the first connection attempt.
+
     Args:
         host: Remote hostname
         user: SSH user
@@ -196,26 +199,34 @@ def test_ssh_connection(host: str, user: str = "root", key_path: Optional[str] =
     Returns:
         True if connection successful
     """
-    try:
-        cmd = ["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes"]
+    cmd = ["ssh", "-o", "ConnectTimeout=15", "-o", "BatchMode=yes"]
 
-        if key_path:
-            cmd.extend(["-i", key_path])
+    if key_path:
+        cmd.extend(["-i", key_path])
 
-        cmd.extend([f"{user}@{host}", "echo", "connected"])
+    cmd.extend([f"{user}@{host}", "echo", "connected"])
 
-        returncode, stdout, stderr = run_command(cmd, check=False, timeout=10)
+    for attempt in (1, 2):
+        try:
+            returncode, stdout, stderr = run_command(cmd, check=False, timeout=45)
 
-        if returncode == 0 and "connected" in stdout:
-            logger.info(f"SSH connection to {host} successful")
-            return True
-        else:
-            logger.error(f"SSH connection to {host} failed")
-            return False
+            if returncode == 0 and "connected" in stdout:
+                logger.info(f"SSH connection to {host} successful")
+                return True
 
-    except Exception as e:
-        logger.error(f"Error testing SSH connection to {host}: {e}")
-        return False
+            detail = (stderr or '').strip().splitlines()[-1:] or ['no stderr']
+            logger.warning(
+                f"SSH connection attempt {attempt}/2 to {host} failed "
+                f"(rc={returncode}): {detail[0]}"
+            )
+
+        except subprocess.TimeoutExpired:
+            logger.warning(f"SSH connection attempt {attempt}/2 to {host} timed out after 45s")
+        except Exception as e:
+            logger.warning(f"SSH connection attempt {attempt}/2 to {host} errored: {e}")
+
+    logger.error(f"SSH connection to {host} failed after 2 attempts")
+    return False
 
 
 def safe_delete(path: str, backup: bool = True) -> bool:
