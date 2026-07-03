@@ -16,6 +16,18 @@ from lib.backup import BackupManager
 from lib.restore import RestoreManager
 from lib.maintenance import MaintenanceManager
 from lib.notifications import NotificationManager
+from lib.config import ConfigError
+
+LOG_FILE = "/opt/server-manager/logs/server-manager.log"
+
+
+def get_log_tail(lines: int = 15) -> str:
+    """Return the last N lines of the application log for failure notifications."""
+    try:
+        with open(LOG_FILE, 'r') as f:
+            return ''.join(f.readlines()[-lines:])
+    except Exception:
+        return ''
 
 
 def cmd_backup(args):
@@ -57,12 +69,14 @@ def cmd_backup(args):
             except Exception as ne:
                 print(f"Warning: Failed to send success notification: {ne}")
         else:
-            print("Backup failed")
+            error_msg = backup_mgr.last_error or 'Backup operation returned false (no error recorded)'
+            print(f"Backup failed: {error_msg}")
+            details = {'error': error_msg, 'duration': f"{duration:.2f} seconds"}
+            log_tail = get_log_tail()
+            if log_tail:
+                details['output'] = f"Last {log_tail.count(chr(10))} log lines from {LOG_FILE}:\n{log_tail}"
             try:
-                notif_mgr.send_backup_notification(
-                    service, False,
-                    {'error': 'Backup operation returned false', 'duration': f"{duration:.2f} seconds"}
-                )
+                notif_mgr.send_backup_notification(service, False, details)
             except Exception as ne:
                 print(f"Warning: Failed to send failure notification: {ne}")
             sys.exit(1)
@@ -70,11 +84,12 @@ def cmd_backup(args):
     except Exception as e:
         duration = (datetime.now() - start_time).total_seconds()
         print(f"Backup error: {e}")
+        details = {'error': str(e), 'duration': f"{duration:.2f} seconds"}
+        log_tail = get_log_tail()
+        if log_tail:
+            details['output'] = f"Last {log_tail.count(chr(10))} log lines from {LOG_FILE}:\n{log_tail}"
         try:
-            notif_mgr.send_backup_notification(
-                service, False,
-                {'error': str(e), 'duration': f"{duration:.2f} seconds"}
-            )
+            notif_mgr.send_backup_notification(service, False, details)
         except Exception as ne:
             print(f"Warning: Failed to send error notification: {ne}")
         sys.exit(1)
@@ -311,7 +326,11 @@ def main():
     cleanup_parser.set_defaults(func=cmd_cleanup)
 
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except ConfigError as e:
+        print(f"Configuration error: {e}")
+        sys.exit(2)
 
 
 if __name__ == "__main__":

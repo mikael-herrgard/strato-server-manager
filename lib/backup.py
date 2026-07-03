@@ -52,6 +52,15 @@ class BackupManager:
         self.local_staging = self.backup_config['local_staging']
         ensure_directory(self.local_staging)
 
+        # Last failure reason — surfaced in failure notifications by cli.py
+        self.last_error: Optional[str] = None
+
+    def _error(self, message: str) -> bool:
+        """Log an error, record it as the last failure reason, and return False."""
+        logger.error(message)
+        self.last_error = message
+        return False
+
     def _get_borg_repo(self, service: str) -> str:
         """
         Get Borg repository URL for a service
@@ -100,8 +109,7 @@ class BackupManager:
                 return True
 
         except subprocess.TimeoutExpired:
-            logger.error(f"Timeout checking Borg repository: {repo}")
-            return False
+            return self._error(f"Timeout checking Borg repository: {repo}")
 
         # Repository doesn't exist — initialize it
         encryption = self.borg_config.get('encryption', 'repokey')
@@ -119,11 +127,10 @@ class BackupManager:
             return True
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to initialize Borg repository {repo}: {e}")
-            return False
+            stderr_tail = (e.stderr or '').strip()[-300:]
+            return self._error(f"Failed to initialize Borg repository {repo}: {stderr_tail or e}")
         except subprocess.TimeoutExpired:
-            logger.error(f"Timeout initializing Borg repository: {repo}")
-            return False
+            return self._error(f"Timeout initializing Borg repository: {repo}")
 
     def initialize_all_repos(self) -> Dict[str, bool]:
         """
@@ -159,8 +166,7 @@ class BackupManager:
 
         # Check disk space
         if not check_disk_space(self.local_staging, required_gb):
-            logger.error(f"Insufficient disk space for {service} backup")
-            return False
+            return self._error(f"Insufficient disk space for {service} backup at {self.local_staging}")
 
         # Check SSH connection to rsync server
         ssh_key = self.rsync_config.get('ssh_key')
@@ -168,17 +174,16 @@ class BackupManager:
         rsync_user = self.rsync_config['user']
 
         if not test_ssh_connection(rsync_host, rsync_user, ssh_key):
-            logger.error(f"Cannot connect to rsync server: {rsync_host}")
-            return False
+            return self._error(f"Cannot connect to rsync server: {rsync_host} (SSH failed after retries)")
 
         # Check Borg passphrase
         if 'BORG_PASSPHRASE' not in self.borg_env:
-            logger.error("BORG_PASSPHRASE not set")
-            return False
+            return self._error("BORG_PASSPHRASE not set")
 
         # Ensure Borg repository exists (auto-initialize if missing)
         repo = self._get_borg_repo(service)
         if not self._ensure_borg_repo(repo):
+            # _ensure_borg_repo already recorded the specific error
             logger.error(f"Borg repository not available for {service}")
             return False
 
@@ -213,8 +218,7 @@ class BackupManager:
         # Check if all sources exist
         for source_path in source_paths:
             if not os.path.exists(source_path):
-                logger.error(f"Source path does not exist: {source_path}")
-                return False
+                return self._error(f"Source path does not exist: {source_path}")
 
         # Build command
         cmd = [
@@ -247,11 +251,10 @@ class BackupManager:
             return True
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Borg backup failed: {e}")
-            return False
+            stderr_tail = (e.stderr or '').strip()[-300:]
+            return self._error(f"Borg backup failed (rc={e.returncode}): {stderr_tail or e}")
         except subprocess.TimeoutExpired:
-            logger.error(f"Borg backup timed out: {archive_name}")
-            return False
+            return self._error(f"Borg backup timed out after 1 hour: {archive_name}")
 
     def verify_backup(self, repo: str, archive_name: str) -> bool:
         """
@@ -281,8 +284,8 @@ class BackupManager:
             return True
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Backup verification failed: {e}")
-            return False
+            stderr_tail = (e.stderr or '').strip()[-300:]
+            return self._error(f"Backup verification failed for {archive_name}: {stderr_tail or e}")
 
     def prune_old_backups(self, repo: str) -> bool:
         """
@@ -414,8 +417,7 @@ class BackupManager:
 
         # Check if nginx directory exists
         if not os.path.exists(nginx_path):
-            logger.error(f"nginx directory not found: {nginx_path}")
-            return False
+            return self._error(f"nginx directory not found: {nginx_path}")
 
         # Create archive name with timestamp
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -470,12 +472,10 @@ class BackupManager:
 
         # Check if Mailcow is installed
         if not os.path.exists(mailcow_path):
-            logger.error(f"Mailcow directory not found: {mailcow_path}")
-            return False
+            return self._error(f"Mailcow directory not found: {mailcow_path}")
 
         if not os.path.exists(backup_script):
-            logger.error(f"Mailcow backup script not found: {backup_script}")
-            return False
+            return self._error(f"Mailcow backup script not found: {backup_script}")
 
         # Ensure backup directory exists
         ensure_directory(mailcow_backup_dir)
@@ -505,8 +505,7 @@ class BackupManager:
                     backup_dirs.append(item_path)
 
             if not backup_dirs:
-                logger.error("No backup directory created by Mailcow script")
-                return False
+                return self._error("No backup directory created by Mailcow script")
 
             # Get the most recent backup directory
             latest_backup = max(backup_dirs, key=os.path.getmtime)
@@ -533,11 +532,10 @@ class BackupManager:
             return True
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Mailcow backup failed: {e}")
-            return False
+            stderr_tail = (e.stderr or '').strip()[-300:]
+            return self._error(f"Mailcow backup script failed (rc={e.returncode}): {stderr_tail or e}")
         except subprocess.TimeoutExpired:
-            logger.error("Mailcow backup timed out")
-            return False
+            return self._error("Mailcow backup timed out after 1 hour")
 
     def backup_mailcow_directory(self, verify: bool = True) -> bool:
         """
@@ -568,8 +566,7 @@ class BackupManager:
 
         # Check if mailcow directory exists
         if not os.path.exists(mailcow_path):
-            logger.error(f"Mailcow directory not found: {mailcow_path}")
-            return False
+            return self._error(f"Mailcow directory not found: {mailcow_path}")
 
         # Create archive name with timestamp
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -625,8 +622,7 @@ class BackupManager:
             return False
 
         if not os.path.exists(config_path):
-            logger.error(f"Config directory not found: {config_path}")
-            return False
+            return self._error(f"Config directory not found: {config_path}")
 
         # Create archive name with timestamp
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -701,8 +697,7 @@ class BackupManager:
         # Validate all paths exist
         missing = [p for p in source_paths if not os.path.exists(p)]
         if missing:
-            logger.error(f"Missing source paths: {missing}")
-            return False
+            return self._error(f"Missing source paths: {missing}")
 
         # Stop services for consistent snapshot
         logger.info("Stopping monitoring services for consistent backup...")
@@ -746,8 +741,7 @@ class BackupManager:
             return True
 
         except Exception as e:
-            logger.error(f"Monitoring stack backup failed: {e}")
-            return False
+            return self._error(f"Monitoring stack backup failed: {e}")
 
         finally:
             # Always restart services
@@ -790,8 +784,7 @@ class BackupManager:
                 logger.warning(f"Credentials file not found: {path}")
 
         if not source_paths:
-            logger.error("No credentials files found to back up")
-            return False
+            return self._error("No credentials files found to back up")
 
         # Create archive name with timestamp
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
