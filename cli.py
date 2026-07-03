@@ -103,7 +103,10 @@ def cmd_restore(args):
         print(f"Available backups for {service}:")
         backups = restore_mgr.list_remote_backups(service)
         if not backups:
-            print("  No backups found.")
+            if restore_mgr.last_error:
+                print(f"  Listing failed: {restore_mgr.last_error}")
+            else:
+                print("  No backups found.")
             sys.exit(1)
         for b in backups:
             print(f"  {b['name']}")

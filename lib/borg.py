@@ -155,7 +155,8 @@ class BorgRepoBase:
             return backups
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to list backups: {e}")
+            stderr_tail = (e.stderr or '').strip()[-300:]
+            self._error(f"Failed to list backups in {repo}: {stderr_tail or e}")
             return []
 
     def list_remote_backups(self, service: str) -> List[Dict[str, str]]:

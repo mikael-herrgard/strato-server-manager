@@ -7,7 +7,135 @@ from ..utils import logger
 
 
 class BackupHandlers:
-    """Handles backup menu operations"""
+    """Handles backup menu operations
+
+    Every per-service handler shares one confirm -> run -> report flow
+    (_run_backup); the per-service dialog texts live in BACKUP_OPERATIONS.
+    """
+
+    BACKUP_OPERATIONS = {
+        'nginx': {
+            'title': 'Backup nginx',
+            'name': 'nginx',
+            'method': 'backup_nginx',
+            'confirm': (
+                "This will create a backup of nginx Proxy Manager.\n\n"
+                "The backup will be stored on your rsync server.\n\n"
+                "This may take 2-5 minutes.\n\n"
+                "Continue?"
+            ),
+            'infobox': "Creating nginx backup...\n\nThis may take a few minutes.",
+            'success': (
+                "nginx backup completed successfully!\n\n"
+                "The backup has been stored on your rsync server and verified."
+            ),
+        },
+        'mailcow': {
+            'title': 'Backup Mailcow',
+            'name': 'Mailcow',
+            'method': 'backup_mailcow',
+            'kwargs': {'backup_type': 'all'},
+            'confirm': (
+                "This will create a complete backup of Mailcow.\n\n"
+                "The backup will be stored on your rsync server.\n\n"
+                "This may take 15-60 minutes depending on your mail volume.\n\n"
+                "Continue?"
+            ),
+            'infobox': (
+                "Creating Mailcow backup...\n\n"
+                "This may take 15-60 minutes.\n"
+                "Please be patient..."
+            ),
+            'success': (
+                "Mailcow backup completed successfully!\n\n"
+                "The backup has been stored on your rsync server and verified."
+            ),
+        },
+        'mailcow-directory': {
+            'title': 'Backup Mailcow Directory',
+            'name': 'Mailcow directory',
+            'method': 'backup_mailcow_directory',
+            'confirm': (
+                "This will create a backup of the Mailcow installation directory.\n\n"
+                "This includes:\n"
+                "  • Configuration files (mailcow.conf)\n"
+                "  • SSL certificates\n"
+                "  • DKIM keys\n"
+                "  • Docker compose files\n\n"
+                "The backup will be stored on your rsync server.\n\n"
+                "This may take 2-5 minutes.\n\n"
+                "Continue?"
+            ),
+            'infobox': "Creating Mailcow directory backup...\n\nThis may take a few minutes.",
+            'success': (
+                "Mailcow directory backup completed successfully!\n\n"
+                "The backup has been stored on your rsync server and verified."
+            ),
+        },
+        'monitoring-stack': {
+            'title': 'Backup Monitoring Stack',
+            'name': 'Monitoring stack',
+            'method': 'backup_monitoring_stack',
+            'confirm': (
+                "This will create a backup of the Monitoring Stack.\n\n"
+                "The backup includes:\n"
+                "  • Grafana dashboards, config, and plugins\n"
+                "  • InfluxDB time-series data and config\n"
+                "  • pressuresuite-influx-bridge code and credentials\n"
+                "  • Associated systemd service/timer units\n\n"
+                "NOTE: Grafana and InfluxDB will be briefly stopped\n"
+                "during the backup for data consistency.\n\n"
+                "The backup will be stored on your rsync server.\n\n"
+                "Continue?"
+            ),
+            'infobox': (
+                "Creating monitoring stack backup...\n\n"
+                "Stopping Grafana and InfluxDB for consistent snapshot.\n"
+                "This may take a few minutes."
+            ),
+            'success': (
+                "Monitoring stack backup completed successfully!\n\n"
+                "The backup has been stored on your rsync server and verified.\n"
+                "Grafana and InfluxDB have been restarted."
+            ),
+        },
+        'server-manager': {
+            'title': 'Backup Server-Manager',
+            'name': 'Server-Manager config',
+            'method': 'backup_server_manager',
+            'confirm': (
+                "This will create a backup of Server-Manager configuration.\n\n"
+                "The backup includes:\n"
+                "  • settings.yaml\n"
+                "  • notifications.yaml\n\n"
+                "The backup will be stored on your rsync server.\n\n"
+                "Continue?"
+            ),
+            'infobox': "Creating Server-Manager config backup...\n\nThis may take a few minutes.",
+            'success': (
+                "Server-Manager config backup completed successfully!\n\n"
+                "The backup has been stored on your rsync server and verified."
+            ),
+        },
+        'credentials': {
+            'title': 'Backup Credentials',
+            'name': 'Credentials',
+            'method': 'backup_credentials',
+            'confirm': (
+                "This will create a backup of centralized credentials.\n\n"
+                "The backup includes:\n"
+                "  • /root/.credentials.env (API tokens)\n"
+                "  • /root/.dns-config (domain-to-provider mapping)\n\n"
+                "The backup will be stored on your rsync server.\n\n"
+                "Continue?"
+            ),
+            'infobox': "Creating credentials backup...\n\nThis should be very fast.",
+            'success': (
+                "Credentials backup completed successfully!\n\n"
+                "The backup has been stored on your rsync server and verified."
+            ),
+        },
+    }
 
     def __init__(self, ui, backup_manager):
         """
@@ -26,215 +154,54 @@ class BackupHandlers:
             return self._backup_manager()
         return self._backup_manager
 
-    def handle_backup_nginx(self):
-        """Backup nginx Proxy Manager"""
-        if not self.ui.confirm_action(
-            "This will create a backup of nginx Proxy Manager.\n\n"
-            "The backup will be stored on your rsync server.\n\n"
-            "This may take 2-5 minutes.\n\n"
-            "Continue?",
-            "Backup nginx"
-        ):
+    def _run_backup(self, key):
+        """Shared confirm -> run -> report flow for a single service backup"""
+        spec = self.BACKUP_OPERATIONS[key]
+
+        if not self.ui.confirm_action(spec['confirm'], spec['title']):
             return
 
         try:
             backup_mgr = self._get_backup_manager()
 
-            self.ui.show_infobox("Creating nginx backup...\n\nThis may take a few minutes.")
+            self.ui.show_infobox(spec['infobox'])
 
-            success = backup_mgr.backup_nginx(verify=True)
+            method = getattr(backup_mgr, spec['method'])
+            success = method(verify=True, **spec.get('kwargs', {}))
 
             if success:
-                self.ui.show_success(
-                    "nginx backup completed successfully!\n\n"
-                    "The backup has been stored on your rsync server and verified."
-                )
-                logger.info("nginx backup completed via TUI")
+                self.ui.show_success(spec['success'])
+                logger.info(f"{spec['name']} backup completed via TUI")
             else:
-                self.ui.show_error("nginx backup failed. Check logs for details.")
+                self.ui.show_error(f"{spec['name']} backup failed. Check logs for details.")
 
         except Exception as e:
-            logger.error(f"nginx backup error: {e}")
+            logger.error(f"{spec['name']} backup error: {e}")
             self.ui.show_error(f"Backup failed:\n\n{e}")
+
+    def handle_backup_nginx(self):
+        """Backup nginx Proxy Manager"""
+        self._run_backup('nginx')
 
     def handle_backup_mailcow(self):
         """Backup Mailcow"""
-        if not self.ui.confirm_action(
-            "This will create a complete backup of Mailcow.\n\n"
-            "The backup will be stored on your rsync server.\n\n"
-            "This may take 15-60 minutes depending on your mail volume.\n\n"
-            "Continue?",
-            "Backup Mailcow"
-        ):
-            return
-
-        try:
-            backup_mgr = self._get_backup_manager()
-
-            self.ui.show_infobox(
-                "Creating Mailcow backup...\n\n"
-                "This may take 15-60 minutes.\n"
-                "Please be patient..."
-            )
-
-            success = backup_mgr.backup_mailcow(backup_type="all", verify=True)
-
-            if success:
-                self.ui.show_success(
-                    "Mailcow backup completed successfully!\n\n"
-                    "The backup has been stored on your rsync server and verified."
-                )
-                logger.info("Mailcow backup completed via TUI")
-            else:
-                self.ui.show_error("Mailcow backup failed. Check logs for details.")
-
-        except Exception as e:
-            logger.error(f"Mailcow backup error: {e}")
-            self.ui.show_error(f"Backup failed:\n\n{e}")
+        self._run_backup('mailcow')
 
     def handle_backup_mailcow_directory(self):
         """Backup Mailcow directory (configuration and certificates)"""
-        if not self.ui.confirm_action(
-            "This will create a backup of the Mailcow installation directory.\n\n"
-            "This includes:\n"
-            "  • Configuration files (mailcow.conf)\n"
-            "  • SSL certificates\n"
-            "  • DKIM keys\n"
-            "  • Docker compose files\n\n"
-            "The backup will be stored on your rsync server.\n\n"
-            "This may take 2-5 minutes.\n\n"
-            "Continue?",
-            "Backup Mailcow Directory"
-        ):
-            return
-
-        try:
-            backup_mgr = self._get_backup_manager()
-
-            self.ui.show_infobox("Creating Mailcow directory backup...\n\nThis may take a few minutes.")
-
-            success = backup_mgr.backup_mailcow_directory(verify=True)
-
-            if success:
-                self.ui.show_success(
-                    "Mailcow directory backup completed successfully!\n\n"
-                    "The backup has been stored on your rsync server and verified."
-                )
-                logger.info("Mailcow directory backup completed via TUI")
-            else:
-                self.ui.show_error("Mailcow directory backup failed. Check logs for details.")
-
-        except Exception as e:
-            logger.error(f"Mailcow directory backup error: {e}")
-            self.ui.show_error(f"Backup failed:\n\n{e}")
-
-    def handle_backup_server_manager(self):
-        """Backup Server-Manager configuration"""
-        if not self.ui.confirm_action(
-            "This will create a backup of Server-Manager configuration.\n\n"
-            "The backup includes:\n"
-            "  • settings.yaml\n"
-            "  • notifications.yaml\n\n"
-            "The backup will be stored on your rsync server.\n\n"
-            "Continue?",
-            "Backup Server-Manager"
-        ):
-            return
-
-        try:
-            backup_mgr = self._get_backup_manager()
-
-            self.ui.show_infobox("Creating Server-Manager config backup...\n\nThis may take a few minutes.")
-
-            success = backup_mgr.backup_server_manager(verify=True)
-
-            if success:
-                self.ui.show_success(
-                    "Server-Manager config backup completed successfully!\n\n"
-                    "The backup has been stored on your rsync server and verified."
-                )
-                logger.info("Server-Manager config backup completed via TUI")
-            else:
-                self.ui.show_error("Server-Manager config backup failed. Check logs for details.")
-
-        except Exception as e:
-            logger.error(f"Server-Manager config backup error: {e}")
-            self.ui.show_error(f"Backup failed:\n\n{e}")
+        self._run_backup('mailcow-directory')
 
     def handle_backup_monitoring_stack(self):
         """Backup Monitoring Stack (Grafana/InfluxDB/pressuresuite bridge)"""
-        if not self.ui.confirm_action(
-            "This will create a backup of the Monitoring Stack.\n\n"
-            "The backup includes:\n"
-            "  • Grafana dashboards, config, and plugins\n"
-            "  • InfluxDB time-series data and config\n"
-            "  • pressuresuite-influx-bridge code and credentials\n"
-            "  • Associated systemd service/timer units\n\n"
-            "NOTE: Grafana and InfluxDB will be briefly stopped\n"
-            "during the backup for data consistency.\n\n"
-            "The backup will be stored on your rsync server.\n\n"
-            "Continue?",
-            "Backup Monitoring Stack"
-        ):
-            return
+        self._run_backup('monitoring-stack')
 
-        try:
-            backup_mgr = self._get_backup_manager()
-
-            self.ui.show_infobox(
-                "Creating monitoring stack backup...\n\n"
-                "Stopping Grafana and InfluxDB for consistent snapshot.\n"
-                "This may take a few minutes."
-            )
-
-            success = backup_mgr.backup_monitoring_stack(verify=True)
-
-            if success:
-                self.ui.show_success(
-                    "Monitoring stack backup completed successfully!\n\n"
-                    "The backup has been stored on your rsync server and verified.\n"
-                    "Grafana and InfluxDB have been restarted."
-                )
-                logger.info("Monitoring stack backup completed via TUI")
-            else:
-                self.ui.show_error("Monitoring stack backup failed. Check logs for details.")
-
-        except Exception as e:
-            logger.error(f"Monitoring stack backup error: {e}")
-            self.ui.show_error(f"Backup failed:\n\n{e}")
+    def handle_backup_server_manager(self):
+        """Backup Server-Manager configuration"""
+        self._run_backup('server-manager')
 
     def handle_backup_credentials(self):
         """Backup centralized credentials"""
-        if not self.ui.confirm_action(
-            "This will create a backup of centralized credentials.\n\n"
-            "The backup includes:\n"
-            "  • /root/.credentials.env (API tokens)\n"
-            "  • /root/.dns-config (domain-to-provider mapping)\n\n"
-            "The backup will be stored on your rsync server.\n\n"
-            "Continue?",
-            "Backup Credentials"
-        ):
-            return
-
-        try:
-            backup_mgr = self._get_backup_manager()
-
-            self.ui.show_infobox("Creating credentials backup...\n\nThis should be very fast.")
-
-            success = backup_mgr.backup_credentials(verify=True)
-
-            if success:
-                self.ui.show_success(
-                    "Credentials backup completed successfully!\n\n"
-                    "The backup has been stored on your rsync server and verified."
-                )
-                logger.info("Credentials backup completed via TUI")
-            else:
-                self.ui.show_error("Credentials backup failed. Check logs for details.")
-
-        except Exception as e:
-            logger.error(f"Credentials backup error: {e}")
-            self.ui.show_error(f"Backup failed:\n\n{e}")
+        self._run_backup('credentials')
 
     def handle_backup_all(self):
         """Backup all services in sequence"""
@@ -252,34 +219,27 @@ class BackupHandlers:
         ):
             return
 
+        # (service key, display label, method kwargs)
+        sequence = [
+            ('credentials', 'Credentials', {}),
+            ('nginx', 'nginx Proxy Manager', {}),
+            ('mailcow-directory', 'Mailcow Directory', {}),
+            ('mailcow', 'Mailcow Data', {'backup_type': 'all'}),
+            ('monitoring-stack', 'Monitoring Stack', {}),
+            ('server-manager', 'Server-Manager Config', {}),
+        ]
+
         try:
             backup_mgr = self._get_backup_manager()
 
             results = {}
-
-            # 1. Credentials
-            self.ui.show_infobox("Backing up Credentials...\n\n(Step 1 of 6)")
-            results['credentials'] = backup_mgr.backup_credentials(verify=True)
-
-            # 2. nginx
-            self.ui.show_infobox("Backing up nginx Proxy Manager...\n\n(Step 2 of 6)")
-            results['nginx'] = backup_mgr.backup_nginx(verify=True)
-
-            # 3. Mailcow Directory
-            self.ui.show_infobox("Backing up Mailcow Directory...\n\n(Step 3 of 6)")
-            results['mailcow-directory'] = backup_mgr.backup_mailcow_directory(verify=True)
-
-            # 4. Mailcow Data
-            self.ui.show_infobox("Backing up Mailcow Data...\n\n(Step 4 of 6)\nThis may take a while...")
-            results['mailcow'] = backup_mgr.backup_mailcow(backup_type='all', verify=True)
-
-            # 5. Monitoring Stack
-            self.ui.show_infobox("Backing up Monitoring Stack...\n\n(Step 5 of 6)")
-            results['monitoring-stack'] = backup_mgr.backup_monitoring_stack(verify=True)
-
-            # 6. Server-Manager
-            self.ui.show_infobox("Backing up Server-Manager Config...\n\n(Step 6 of 6)")
-            results['server-manager'] = backup_mgr.backup_server_manager(verify=True)
+            for step, (key, label, kwargs) in enumerate(sequence, 1):
+                extra = "\nThis may take a while..." if key == 'mailcow' else ""
+                self.ui.show_infobox(
+                    f"Backing up {label}...\n\n(Step {step} of {len(sequence)}){extra}"
+                )
+                method = getattr(backup_mgr, self.BACKUP_OPERATIONS[key]['method'])
+                results[key] = method(verify=True, **kwargs)
 
             # Build summary
             succeeded = sum(1 for v in results.values() if v)

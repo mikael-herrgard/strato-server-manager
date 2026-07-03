@@ -166,27 +166,44 @@ class RestoreManager(BorgRepoBase):
             logger.error(f"Failed to verify services: {e}")
             return False
 
-    def restore_nginx(self, backup_name: str = "latest") -> bool:
+    def _restore_directory_service(
+        self,
+        service: str,
+        target_path: str,
+        backup_name: str = "latest",
+        required_gb: int = 5,
+        startup_wait: int = 10,
+        post_swap=None
+    ) -> bool:
         """
-        Restore nginx Proxy Manager from backup
+        Generic restore for services that are a plain directory with a
+        docker-compose.yml: extract to staging -> verify extraction ->
+        stop service -> pre-restore safety copy -> swap -> start ->
+        verify running.
+
+        The live installation is only touched after the archive has
+        been extracted and verified, and never deleted unless the
+        safety copy succeeded.
 
         Args:
-            backup_name: Backup name to restore ("latest" for most recent)
+            service: Service/repo name (nginx, mailcow-directory)
+            target_path: Live installation directory
+            backup_name: Archive to restore ("latest" for most recent)
+            required_gb: Required staging disk space in GB
+            startup_wait: Seconds to wait before verifying containers
+            post_swap: Optional callable(target_path) run after the swap
 
         Returns:
             True if successful
         """
-        logger.info(f"Starting nginx restore (backup: {backup_name})")
+        logger.info(f"Starting {service} restore (backup: {backup_name})")
 
-        # Get nginx configuration
-        nginx_path = self.nginx_config['install_path']
-        repo = self._get_borg_repo('nginx')
+        repo = self._get_borg_repo(service)
 
         # Get backup list
-        backups = self.list_remote_backups('nginx')
+        backups = self.list_remote_backups(service)
         if not backups:
-            logger.error("No nginx backups found")
-            return False
+            return self._error(f"No {service} backups found")
 
         # Select backup
         if backup_name == "latest":
@@ -196,12 +213,14 @@ class RestoreManager(BorgRepoBase):
             selected_backup = backup_name
 
         # Check disk space
-        if not check_disk_space(self.local_staging, 5):
-            logger.error("Insufficient disk space for restore")
-            return False
+        if not check_disk_space(self.local_staging, required_gb):
+            return self._error(f"Insufficient disk space for {service} restore")
 
         # Create temporary extraction directory
-        temp_dir = os.path.join(self.local_staging, f'restore-nginx-{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+        temp_dir = os.path.join(
+            self.local_staging,
+            f'restore-{service}-{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+        )
         ensure_directory(temp_dir)
 
         try:
@@ -210,60 +229,68 @@ class RestoreManager(BorgRepoBase):
             if not self._extract_backup(repo, selected_backup, temp_dir):
                 return False
 
-            # Find extracted nginx directory
-            extracted_nginx = os.path.join(temp_dir, nginx_path.lstrip('/'))
-
-            if not os.path.exists(extracted_nginx):
-                logger.error(f"nginx directory not found in backup: {extracted_nginx}")
-                return False
+            extracted = os.path.join(temp_dir, target_path.lstrip('/'))
+            if not os.path.exists(extracted):
+                return self._error(f"{service} directory not found in backup: {extracted}")
 
             # Extraction verified — now stop the service and swap
-            if os.path.exists(nginx_path):
-                self._stop_service(nginx_path)
-                backup_path = self._backup_existing_installation(nginx_path, 'nginx')
+            if os.path.exists(target_path):
+                self._stop_service(target_path)
+                backup_path = self._backup_existing_installation(target_path, service)
 
                 if backup_path is None:
                     # Safety copy failed — do NOT delete the live installation
                     logger.error("Pre-restore safety copy failed — aborting restore")
-                    self._start_service(nginx_path)
+                    self._start_service(target_path)
                     return False
 
                 logger.info(f"Existing installation saved to: {backup_path}")
 
-                # Remove existing installation
-                logger.info(f"Removing existing installation: {nginx_path}")
-                shutil.rmtree(nginx_path)
+                logger.info(f"Removing existing installation: {target_path}")
+                shutil.rmtree(target_path)
 
             # Move to target location
-            logger.info(f"Moving nginx installation to: {nginx_path}")
-            ensure_directory(os.path.dirname(nginx_path))
-            shutil.move(extracted_nginx, nginx_path)
+            logger.info(f"Moving {service} installation to: {target_path}")
+            ensure_directory(os.path.dirname(target_path))
+            shutil.move(extracted, target_path)
 
             # Set permissions
-            run_command(['chown', '-R', 'root:root', nginx_path], check=False, timeout=60)
+            run_command(['chown', '-R', 'root:root', target_path], check=False, timeout=60)
+
+            if post_swap:
+                post_swap(target_path)
 
             # Start service
-            self._start_service(nginx_path)
+            self._start_service(target_path)
 
-            # Wait a moment for services to start
+            # Wait for services to start
             import time
-            time.sleep(10)
+            time.sleep(startup_wait)
 
             # Verify services are running
-            if self._verify_service_running(nginx_path):
-                logger.info("nginx restore completed successfully")
-                return True
+            if self._verify_service_running(target_path):
+                logger.info(f"{service} restore completed successfully")
             else:
-                logger.warning("nginx restored but services may not be running properly")
-                return True
+                logger.warning(f"{service} restored but services may not be running properly")
+
+            return True
 
         except Exception as e:
-            logger.error(f"nginx restore failed: {e}", exc_info=True)
+            logger.error(f"{service} restore failed: {e}", exc_info=True)
             return False
         finally:
             # Cleanup temp directory
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
+
+    def restore_nginx(self, backup_name: str = "latest") -> bool:
+        """Restore nginx Proxy Manager from backup."""
+        return self._restore_directory_service(
+            'nginx',
+            self.nginx_config['install_path'],
+            backup_name=backup_name,
+            startup_wait=10,
+        )
 
     def restore_mailcow(self, backup_name: str = "latest") -> bool:
         """
@@ -443,122 +470,23 @@ class RestoreManager(BorgRepoBase):
 
     def restore_mailcow_directory(self, backup_name: str = "latest") -> bool:
         """
-        Restore Mailcow directory (configuration and certificates) from backup
-
-        This restores /opt/mailcow-dockerized including:
-        - mailcow.conf
-        - docker-compose.yml and related files
-        - SSL certificates
-        - DKIM keys
-        - Configuration files
-
-        Args:
-            backup_name: Backup name to restore ("latest" for most recent)
-
-        Returns:
-            True if successful
+        Restore Mailcow installation directory (mailcow.conf, compose
+        files, SSL certificates, DKIM keys) from backup.
         """
-        logger.info(f"Starting Mailcow directory restore (backup: {backup_name})")
-
-        # Get Mailcow configuration
-        mailcow_path = self.mailcow_config['install_path']
-        repo = self._get_borg_repo('mailcow-directory')
-
-        # Get backup list
-        backups = self.list_remote_backups('mailcow-directory')
-        if not backups:
-            logger.error("No Mailcow directory backups found")
-            return False
-
-        # Select backup
-        if backup_name == "latest":
-            selected_backup = backups[-1]['name']
-            logger.info(f"Using latest backup: {selected_backup}")
-        else:
-            selected_backup = backup_name
-
-        # Check disk space
-        if not check_disk_space(self.local_staging, 5):
-            logger.error("Insufficient disk space for restore")
-            return False
-
-        # Create temporary extraction directory
-        temp_dir = os.path.join(
-            self.local_staging,
-            f'restore-mailcow-directory-{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-        )
-        ensure_directory(temp_dir)
-
-        try:
-            # Extract backup FIRST, while the live installation is untouched.
-            # If extraction fails we abort with the running service intact.
-            if not self._extract_backup(repo, selected_backup, temp_dir):
-                return False
-
-            # Find extracted mailcow directory
-            extracted_mailcow = os.path.join(temp_dir, mailcow_path.lstrip('/'))
-
-            if not os.path.exists(extracted_mailcow):
-                logger.error(f"Mailcow directory not found in backup: {extracted_mailcow}")
-                return False
-
-            # Extraction verified — now stop the service and swap
-            if os.path.exists(mailcow_path):
-                logger.info("Stopping Mailcow services...")
-                self._stop_service(mailcow_path)
-
-                # Backup existing directory
-                backup_path = self._backup_existing_installation(mailcow_path, 'mailcow-directory')
-                if backup_path is None:
-                    # Safety copy failed — do NOT delete the live installation
-                    logger.error("Pre-restore safety copy failed — aborting restore")
-                    self._start_service(mailcow_path)
-                    return False
-
-                logger.info(f"Existing installation saved to: {backup_path}")
-
-                # Remove existing installation
-                logger.info(f"Removing existing installation: {mailcow_path}")
-                shutil.rmtree(mailcow_path)
-
-            # Move to target location
-            logger.info(f"Moving Mailcow directory to: {mailcow_path}")
-            ensure_directory(os.path.dirname(mailcow_path))
-            shutil.move(extracted_mailcow, mailcow_path)
-
-            # Set permissions
-            logger.info("Setting permissions...")
-            run_command(['chown', '-R', 'root:root', mailcow_path], check=False, timeout=60)
+        def _fix_script_permissions(path):
+            logger.info("Setting script permissions...")
             for script in ['generate_config.sh', 'update.sh']:
-                script_path = os.path.join(mailcow_path, script)
+                script_path = os.path.join(path, script)
                 if os.path.exists(script_path):
                     os.chmod(script_path, 0o755)
 
-            logger.info("Mailcow directory restore completed successfully")
-
-            # Start services (docker compose up -d will pull images if needed)
-            logger.info("Starting Mailcow services...")
-            self._start_service(mailcow_path)
-
-            # Wait for services to start
-            import time
-            time.sleep(20)
-
-            # Verify services are running
-            if self._verify_service_running(mailcow_path):
-                logger.info("Mailcow services are running")
-            else:
-                logger.warning("Mailcow restored but services may not be running properly")
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Mailcow directory restore failed: {e}", exc_info=True)
-            return False
-        finally:
-            # Cleanup temp directory
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
+        return self._restore_directory_service(
+            'mailcow-directory',
+            self.mailcow_config['install_path'],
+            backup_name=backup_name,
+            startup_wait=20,
+            post_swap=_fix_script_permissions,
+        )
 
     def restore_server_manager(self, backup_name: str = "latest") -> bool:
         """
