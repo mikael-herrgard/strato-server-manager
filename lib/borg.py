@@ -365,3 +365,73 @@ class BorgRepoBase:
         except subprocess.CalledProcessError as e:
             logger.error(f"Pruning failed: {e}")
             return False
+
+    def check_repository(self, service: str, timeout: int = 3600) -> bool:
+        """
+        Run 'borg check' against a service's repository.
+
+        Verifies repository segment consistency and archive metadata.
+        The heavy repository I/O runs server-side (borg serve on the
+        remote), so this does not download archive data. Deliberately
+        NOT --verify-data, which would download every byte.
+
+        Args:
+            service: Service name (nginx, mailcow, ...)
+            timeout: Per-repository timeout in seconds
+
+        Returns:
+            True if the repository checks out
+        """
+        repo = self._get_borg_repo(service)
+        logger.info(f"Running borg check on repository: {repo}")
+
+        try:
+            with CommandExecutor(f"Borg check: {service}"):
+                returncode, stdout, stderr = run_command(
+                    ['borg', 'check', repo],
+                    check=True,
+                    env=self.borg_env,
+                    timeout=timeout
+                )
+
+            logger.info(f"Repository check passed: {service}")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            stderr_tail = (e.stderr or '').strip()[-500:]
+            return self._error(
+                f"borg check FAILED for {service} ({repo}): {stderr_tail or e}"
+            )
+        except subprocess.TimeoutExpired:
+            return self._error(
+                f"borg check timed out after {timeout}s for {service} ({repo})"
+            )
+
+    def check_all_repositories(self, timeout: int = 3600) -> Dict[str, bool]:
+        """
+        Run 'borg check' against every known service repository.
+
+        Args:
+            timeout: Per-repository timeout in seconds
+
+        Returns:
+            Dictionary mapping service name to check result
+        """
+        logger.info("Checking integrity of all Borg repositories")
+
+        results = {}
+        errors = []
+        for service in self.BACKUP_SERVICES:
+            results[service] = self.check_repository(service, timeout=timeout)
+            if not results[service] and self.last_error:
+                errors.append(self.last_error)
+
+        failed = [s for s, ok in results.items() if not ok]
+        if failed:
+            # Collect all failure reasons, not just the last one
+            self.last_error = '; '.join(errors) or f"check failed for: {', '.join(failed)}"
+            logger.error(f"Repository check failures: {', '.join(failed)}")
+        else:
+            logger.info("All repository checks passed")
+
+        return results

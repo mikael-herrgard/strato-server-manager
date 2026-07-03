@@ -164,7 +164,9 @@ class SchedulingManager:
         if match:
             return f'backup_{match.group(1)}'
 
-        if 'gandi-token-renew' in command:
+        if 'borg-check' in command:
+            return 'borg_check'
+        elif 'gandi-token-renew' in command:
             return 'gandi_token_renew'
         elif 'cleanup' in command:
             return 'cleanup'
@@ -629,6 +631,47 @@ class SchedulingManager:
 
         except Exception as e:
             logger.error(f"Failed to schedule Gandi token renewal: {e}")
+            return False
+
+    def schedule_borg_check(self) -> bool:
+        """
+        Schedule monthly Borg repository integrity check.
+
+        Runs on the 1st of each month at 06:00 — after the nightly
+        backup window (01:55-05:31) so borg repo locks never collide.
+        Replaces any existing borg_check cron job.
+
+        Returns:
+            True if scheduled successfully
+        """
+        try:
+            script_path = "/opt/server-manager/scripts/borg-check.sh"
+            log_file = "/opt/server-manager/logs/borg-check-cron.log"
+            lock_file = "/tmp/borg-check.lock"
+
+            cmd = f"flock -n {lock_file} {script_path} >> {log_file} 2>&1"
+
+            current = self.get_current_schedule()
+            jobs = [j for j in current.get('jobs', []) if j['type'] != 'borg_check']
+
+            jobs.append({
+                'minute': '0',
+                'hour': '6',
+                'day': '1',
+                'month': '*',
+                'weekday': '*',
+                'command': cmd,
+                'schedule': '0 6 1 * *',
+                'type': 'borg_check'
+            })
+
+            self._write_crontab(jobs, current.get('preserved', []))
+
+            logger.info("Scheduled Borg repository check: 1st of month at 06:00")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to schedule Borg check: {e}")
             return False
 
     def schedule_weekly_summary(self) -> bool:
