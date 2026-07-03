@@ -242,16 +242,19 @@ def cmd_cleanup(args):
         else:
             size_str = f"{stats['space_freed_mb']:.1f} MB"
 
+        files_removed = stats.get('files_removed', 0)
         print(f"\nCleanup completed:")
         print(f"  Directories removed: {stats['backups_removed']}")
+        print(f"  Files removed: {files_removed}")
         print(f"  Space freed: {size_str}")
 
-        if stats['backups_removed'] > 0:
+        if stats['backups_removed'] > 0 or files_removed > 0:
             notif_mgr.send_maintenance_notification(
                 "Backup Cleanup",
                 stats['success'],
                 {
                     'directories_removed': stats['backups_removed'],
+                    'files_removed': files_removed,
                     'space_freed': size_str,
                     'retention_days': retention_days,
                 }

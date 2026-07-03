@@ -455,9 +455,23 @@ class MaintenanceManager:
             logger.error(f"Unexpected error during Docker cleanup: {e}")
             return stats
 
+    # Glob patterns for backup FILES (not directories) created by
+    # save_config() and the credentials restore path
+    CLEANUP_FILE_PATTERNS = [
+        '/opt/server-manager/config/settings.yaml.backup.*',
+        '/opt/server-manager/config/notifications.yaml.backup.*',
+        '/root/.credentials.env.pre-restore.*',
+        '/root/.dns-config.pre-restore.*',
+    ]
+
     def cleanup_old_backups(self, keep_days: int = 7) -> Dict[str, any]:
         """
-        Clean up old pre-update and pre-restore backups
+        Clean up old pre-update, pre-restore, and rollback copies.
+
+        Covers directory copies next to all managed install paths
+        (nginx, mailcow, server-manager, and the monitoring stack's
+        grafana/influxdb/bridge paths) plus known backup files
+        (settings.yaml.backup.*, .credentials.env.pre-restore.*, ...).
 
         Args:
             keep_days: Number of days to keep backups
@@ -469,13 +483,23 @@ class MaintenanceManager:
 
         stats = {
             'backups_removed': 0,
+            'files_removed': 0,
             'space_freed_mb': 0,
             'success': False
         }
 
-        nginx_path = self.nginx_config['install_path']
-        mailcow_path = self.mailcow_config['install_path']
-        app_path = '/opt/server-manager'
+        monitoring_config = self.config.get_monitoring_stack_config()
+
+        base_paths = [
+            self.nginx_config['install_path'],
+            self.mailcow_config['install_path'],
+            '/opt/server-manager',
+            monitoring_config['grafana_data_path'],
+            monitoring_config['grafana_config_path'],
+            monitoring_config['influxdb_data_path'],
+            monitoring_config['influxdb_config_path'],
+            monitoring_config['bridge_install_path'],
+        ]
 
         backup_patterns = [
             '.pre-update.',
@@ -486,7 +510,8 @@ class MaintenanceManager:
         try:
             cutoff_time = datetime.now().timestamp() - (keep_days * 86400)
 
-            for base_path in [nginx_path, mailcow_path, app_path]:
+            # 1. Directory copies next to managed install paths
+            for base_path in base_paths:
                 parent_dir = os.path.dirname(base_path)
                 base_name = os.path.basename(base_path)
 
@@ -522,8 +547,23 @@ class MaintenanceManager:
                         stats['backups_removed'] += 1
                         stats['space_freed_mb'] += size_mb
 
+            # 2. Backup files (config auto-backups, credentials pre-restore copies)
+            import glob
+            for pattern in self.CLEANUP_FILE_PATTERNS:
+                for file_path in glob.glob(pattern):
+                    if not os.path.isfile(file_path):
+                        continue
+
+                    if os.path.getmtime(file_path) < cutoff_time:
+                        size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                        logger.info(f"Removing old backup file: {file_path}")
+                        os.remove(file_path)
+                        stats['files_removed'] += 1
+                        stats['space_freed_mb'] += size_mb
+
             stats['success'] = True
-            logger.info(f"Cleanup completed: {stats['backups_removed']} backups removed, "
+            logger.info(f"Cleanup completed: {stats['backups_removed']} backup dirs and "
+                       f"{stats['files_removed']} files removed, "
                        f"{stats['space_freed_mb']:.1f} MB freed")
             return stats
 
