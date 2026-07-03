@@ -7,152 +7,26 @@ import os
 import subprocess
 import shutil
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from .utils import (
     logger,
     run_command,
     check_disk_space,
     ensure_directory,
-    safe_delete,
     CommandExecutor,
     stop_systemd_service,
     start_systemd_service,
     verify_systemd_service
 )
-from .config import get_config
+from .borg import BorgRepoBase
 
 
-class RestoreManager:
-    """Manage restore operations for all services"""
+class RestoreManager(BorgRepoBase):
+    """Manage restore operations for all services
 
-    def __init__(self):
-        """Initialize restore manager"""
-        self.config = get_config()
-
-        # Get configuration
-        self.borg_config = self.config.get_borg_config()
-        self.rsync_config = self.config.get_rsync_config()
-        self.backup_config = self.config.get_backup_config()
-        self.nginx_config = self.config.get_nginx_config()
-        self.mailcow_config = self.config.get_mailcow_config()
-
-        # Setup environment for Borg
-        self.borg_env = os.environ.copy()
-        passphrase = self.config.get_secret('BORG_PASSPHRASE')
-        if passphrase:
-            self.borg_env['BORG_PASSPHRASE'] = passphrase
-
-        self.borg_env['BORG_REMOTE_PATH'] = self.borg_config['remote_path']
-        self.borg_env['BORG_RELOCATED_REPO_ACCESS_IS_OK'] = 'yes'
-
-        # Local staging area for downloads
-        self.local_staging = self.backup_config['local_staging']
-        ensure_directory(self.local_staging)
-
-    def _get_borg_repo(self, service: str) -> str:
-        """
-        Get Borg repository URL for a service
-
-        Args:
-            service: Service name (nginx, mailcow, application)
-
-        Returns:
-            Borg repository URL
-        """
-        rsync_host = self.rsync_config['host']
-        base_path = self.rsync_config['base_path'].strip('/')
-
-        # Use relative path format (./path) for rsync.net compatibility
-        return f"ssh://{rsync_host}/./{base_path}/{service}-backup"
-
-    def list_remote_backups(self, service: str) -> List[Dict[str, str]]:
-        """
-        List available backups from rsync server
-
-        Args:
-            service: Service name (nginx, mailcow, server-manager)
-
-        Returns:
-            List of backup dictionaries with name and timestamp
-        """
-        logger.info(f"Listing remote backups for {service}")
-
-        repo = self._get_borg_repo(service)
-        cmd = ['borg', 'list', '--short', repo]
-
-        try:
-            returncode, stdout, stderr = run_command(
-                cmd,
-                check=True,
-                env=self.borg_env,
-                timeout=60
-            )
-
-            backups = []
-            for line in stdout.strip().split('\n'):
-                if line:
-                    backups.append({
-                        'name': line.strip(),
-                        'service': service
-                    })
-
-            logger.info(f"Found {len(backups)} backups for {service}")
-            return backups
-
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to list backups for {service}: {e}")
-            return []
-
-    def _extract_backup(
-        self,
-        repo: str,
-        archive_name: str,
-        extract_path: str
-    ) -> bool:
-        """
-        Extract a Borg backup to specified path
-
-        Args:
-            repo: Borg repository URL
-            archive_name: Archive name to extract
-            extract_path: Path to extract to
-
-        Returns:
-            True if successful
-        """
-        logger.info(f"Extracting backup: {archive_name} to {extract_path}")
-
-        # Ensure extract path exists
-        ensure_directory(extract_path)
-
-        # Build command
-        cmd = [
-            'borg', 'extract',
-            '--verbose',
-            '--progress',
-            f"{repo}::{archive_name}"
-        ]
-
-        try:
-            with CommandExecutor(f"Extracting backup: {archive_name}"):
-                returncode, stdout, stderr = run_command(
-                    cmd,
-                    check=True,
-                    cwd=extract_path,
-                    env=self.borg_env,
-                    timeout=3600  # 1 hour timeout
-                )
-
-            logger.info(f"Extraction completed successfully: {archive_name}")
-            return True
-
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Extraction failed: {e}")
-            return False
-        except subprocess.TimeoutExpired:
-            logger.error(f"Extraction timed out: {archive_name}")
-            return False
+    Borg environment, repository addressing, and archive operations
+    (list/extract) come from BorgRepoBase.
+    """
 
     def _backup_existing_installation(self, path: str, service: str) -> Optional[str]:
         """
