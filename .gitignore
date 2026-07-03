@@ -14,6 +14,7 @@ logs/
 
 # State files
 state/
+schedules/
 
 # Local configuration (use settings.yaml.example as template)
 config/settings.yaml
