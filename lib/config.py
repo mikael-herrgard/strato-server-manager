@@ -10,6 +10,15 @@ from typing import Any, Dict, Optional
 from .utils import logger, validate_path
 
 
+class ConfigError(Exception):
+    """Raised when an existing configuration file cannot be loaded.
+
+    A broken settings.yaml must abort loudly rather than silently falling
+    back to defaults — defaults point backups at paths/keys that don't
+    exist on this server, producing confusing failures far from the cause.
+    """
+
+
 class ConfigManager:
     """Manage application configuration"""
 
@@ -28,32 +37,47 @@ class ConfigManager:
         self._load_config()
 
     def _load_config(self):
-        """Load configuration from YAML file"""
-        try:
-            if not os.path.exists(self.config_path):
-                logger.warning(f"Configuration file not found: {self.config_path}")
-                logger.info("Using default configuration")
-                self.config = self._get_default_config()
-                return
+        """Load configuration from YAML file
 
+        A missing config file falls back to defaults (fresh-install case).
+        A config file that exists but cannot be parsed raises ConfigError —
+        silently running backups against default paths/keys is worse than
+        failing loudly.
+
+        Raises:
+            ConfigError: If the config file exists but is unreadable/invalid
+        """
+        if not os.path.exists(self.config_path):
+            logger.warning(f"Configuration file not found: {self.config_path}")
+            logger.info("Using default configuration")
+            self.config = self._get_default_config()
+            return
+
+        try:
             with open(self.config_path, 'r') as f:
                 self.config = yaml.safe_load(f)
-
-            logger.info(f"Configuration loaded from: {self.config_path}")
-
-            # Validate configuration
-            if not self._validate_config():
-                logger.warning("Configuration validation failed, using defaults for missing values")
-
         except yaml.YAMLError as e:
             logger.error(f"Error parsing YAML configuration: {e}")
-            logger.info("Using default configuration")
-            self.config = self._get_default_config()
+            raise ConfigError(
+                f"Invalid YAML in {self.config_path}: {e}\n"
+                f"Fix the file (or remove it to use defaults) and retry."
+            ) from e
+        except OSError as e:
+            logger.error(f"Error reading configuration: {e}")
+            raise ConfigError(f"Cannot read {self.config_path}: {e}") from e
 
-        except Exception as e:
-            logger.error(f"Error loading configuration: {e}")
-            logger.info("Using default configuration")
-            self.config = self._get_default_config()
+        if not isinstance(self.config, dict):
+            logger.error(f"Configuration file is empty or not a mapping: {self.config_path}")
+            raise ConfigError(
+                f"{self.config_path} exists but contains no configuration mapping. "
+                f"Fix the file (or remove it to use defaults) and retry."
+            )
+
+        logger.info(f"Configuration loaded from: {self.config_path}")
+
+        # Fill in any missing sections with defaults
+        if not self._validate_config():
+            logger.warning("Configuration validation failed, using defaults for missing values")
 
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
