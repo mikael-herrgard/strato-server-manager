@@ -3,6 +3,7 @@ Backup Operations Module
 Handles Borg backups for nginx, Mailcow, and application files
 """
 
+import gzip
 import os
 import subprocess
 from datetime import datetime
@@ -218,6 +219,64 @@ class BackupManager(BorgRepoBase):
             required_gb=5,
         )
 
+    def _dump_mailcow_db(self, target_dir: str) -> bool:
+        """
+        Dump the Mailcow MySQL database into target_dir as backup_mysql.gz.
+
+        Mailcow's own backup script skips the DB on this host: its docker run
+        passes --sysctl net.ipv6.conf.all.disable_ipv6=1, which fails when the
+        kernel has IPv6 fully disabled. backup_mysql.gz is a filename the
+        official restore script picks up natively (gunzip | mysql).
+        """
+        mailcow_conf = os.path.join(self.mailcow_config['install_path'], 'mailcow.conf')
+        db = {}
+        try:
+            with open(mailcow_conf) as f:
+                for line in f:
+                    key, _, value = line.strip().partition('=')
+                    if key in ('DBNAME', 'DBUSER', 'DBPASS'):
+                        db[key] = value
+        except OSError as e:
+            return self._error(f"Cannot read mailcow.conf for DB dump: {e}")
+
+        missing = [k for k in ('DBNAME', 'DBUSER', 'DBPASS') if not db.get(k)]
+        if missing:
+            return self._error(f"mailcow.conf missing {', '.join(missing)} — cannot dump database")
+
+        returncode, stdout, _ = run_command(['docker', 'ps', '-qf', 'name=mysql-mailcow'])
+        container_id = stdout.strip().splitlines()[0] if stdout.strip() else ''
+        if not container_id:
+            return self._error("mysql-mailcow container not running — cannot dump database")
+
+        dump_path = os.path.join(target_dir, 'backup_mysql.gz')
+        logger.info(f"Dumping Mailcow database ({db['DBNAME']}) to {dump_path}")
+        # Password goes via env inside the container, not argv; run subprocess
+        # directly instead of run_command so neither ends up in the log.
+        cmd = [
+            'docker', 'exec', '-e', f"MYSQL_PWD={db['DBPASS']}", container_id,
+            'mysqldump', '--single-transaction', '--default-character-set=utf8mb4',
+            '-u', db['DBUSER'], '--databases', db['DBNAME'],
+        ]
+        try:
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
+        except subprocess.TimeoutExpired:
+            return self._error("Mailcow DB dump timed out after 300s")
+
+        if result.returncode != 0:
+            stderr_tail = result.stderr.decode(errors='replace').strip()[-300:]
+            return self._error(f"mysqldump failed (rc={result.returncode}): {stderr_tail}")
+        if b'-- Dump completed' not in result.stdout[-500:]:
+            return self._error("Mailcow DB dump is truncated (no completion marker)")
+
+        try:
+            with gzip.open(dump_path, 'wb') as gz:
+                gz.write(result.stdout)
+        except OSError as e:
+            return self._error(f"Failed to write {dump_path}: {e}")
+
+        logger.info(f"Mailcow database dumped: {len(result.stdout) / 1048576:.1f} MB uncompressed")
+        return True
+
     def backup_mailcow(self, backup_type: str = "all", verify: bool = True) -> bool:
         """
         Backup Mailcow using official backup script
@@ -281,6 +340,13 @@ class BackupManager(BorgRepoBase):
             # Get the most recent backup directory
             latest_backup = max(backup_dirs, key=os.path.getmtime)
             logger.info(f"Mailcow backup created: {latest_backup}")
+
+            # The official script silently skips the DB on this host (its
+            # --sysctl IPv6 flag fails with kernel IPv6 disabled), so dump
+            # the database ourselves before uploading.
+            if backup_type in ('all', 'db', 'mysql'):
+                if not self._dump_mailcow_db(latest_backup):
+                    return False
 
             # Now create Borg archive from this backup
             return self._finish_backup('mailcow', [latest_backup], None, verify)

@@ -417,8 +417,10 @@ class RestoreManager(BorgRepoBase):
             # 1. "Backup location (absolute path, starting with /):" - provide the parent directory
             # 2. "Select a restore point:" - provide "1" to select the first mailcow-* folder
             # 3. "Select a dataset to restore:" - provide "0" for all datasets
+            # 4. MySQL restore confirmation "proceed? [Y|n]" - provide "Y"
+            #    (only asked when the backup contains a DB dump)
             # Provide automatic responses to interactive prompts
-            input_data = f"{backup_parent_dir}\n1\n0\n"
+            input_data = f"{backup_parent_dir}\n1\n0\nY\n"
 
             logger.info(f"Providing backup location: {backup_parent_dir}")
 
