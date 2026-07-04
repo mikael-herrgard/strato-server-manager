@@ -1,68 +1,99 @@
 # Server Manager
 
-Unified TUI application for managing VPS server installations, backups, and disaster recovery.
+Unified TUI + CLI application for managing a VPS running Mailcow, Nginx Proxy Manager, and a Grafana/InfluxDB monitoring stack — with automated Borg backups to a remote repository and one-script disaster recovery.
 
 ## Overview
 
-Server Manager provides a unified interface (similar to raspi-config) for managing:
-- **Backup Management**: Automated backups of nginx, Mailcow, and application files to remote rsync server
-- **Restore Management**: Quick restoration from backups for disaster recovery
-- **Installation**: Automated installation of Docker, Mailcow, and nginx Proxy Manager
-- **System Configuration**: IPv6 management, firewall, network settings
-- **Maintenance**: Updates and cleanup operations
-- **Monitoring**: Service status, disk usage, backup history
+Server Manager provides two entry points:
+
+- **`server_manager.py`** — interactive TUI (raspi-config style) for day-to-day management
+- **`cli.py`** — non-interactive CLI used by cron and disaster recovery
+
+Capabilities:
+
+- **Backup**: Automated nightly Borg backups of 6 services to a remote repository over SSH
+- **Restore**: Per-service or full-server restore, safe extract-then-swap ordering with pre-restore safety copies
+- **Integrity**: Monthly `borg check` of all repositories with email alerts on failure
+- **Installation**: Automated installation of Docker, Mailcow, and Nginx Proxy Manager
+- **Scheduling**: Managed crontab (queue-based night window, preserves foreign cron entries)
+- **Maintenance**: Updates with rollback, cleanup of aged backup artifacts
+- **Monitoring**: Service status, disk usage, backup history, email notifications
+
+## The 6 Backup Services
+
+| Service | Contents |
+|---------|----------|
+| `credentials` | `/root/.credentials.env`, `/root/.dns-config` (API tokens, DNS config) |
+| `nginx` | `/root/nginx` — NPM data, certificates, proxy host database |
+| `mailcow` | Full mail data via mailcow's official backup script: **vmail (all emails)**, crypt keys, Redis, Rspamd, Postfix queue, `mailcow.conf`, **plus a MySQL dump** (`backup_mysql.gz`) created by Server Manager |
+| `mailcow-directory` | `/opt/mailcow-dockerized` installation dir (compose files, config overrides) — no mail data |
+| `server-manager` | This application's config (`settings.yaml`, `notifications.yaml`) |
+| `monitoring-stack` | Grafana + InfluxDB data/config (services stopped during backup for consistency) |
+
+> **Why the extra MySQL dump?** Mailcow's official backup script runs its DB backup in a `docker run` with `--sysctl net.ipv6.conf.all.disable_ipv6=1`, which fails silently on hosts with IPv6 disabled at kernel level (as this server has). Server Manager therefore dumps the database itself via `docker exec` + `mysqldump` into the backup directory as `backup_mysql.gz` — the exact filename mailcow's official **restore** script consumes natively. The backup fails loudly if the dump fails.
+
+## CLI Usage
+
+```bash
+cd /opt/server-manager
+
+# Backups (what cron runs nightly)
+venv/bin/python3 cli.py backup <service> --verify
+
+# List available archives for a service
+venv/bin/python3 cli.py restore <service> --list
+
+# Restore one service (interactive confirmation unless --yes)
+venv/bin/python3 cli.py restore <service> [--archive NAME] [--yes]
+
+# Full disaster recovery — all services in dependency order
+venv/bin/python3 cli.py restore-all --yes
+
+# Borg repository integrity check (what cron runs monthly)
+venv/bin/python3 cli.py check [service|all] [--timeout SECONDS]
+
+# Clean up aged pre-update/pre-restore/rollback artifacts
+venv/bin/python3 cli.py cleanup [--retention-days N]
+```
+
+`<service>` is one of: `nginx`, `mailcow`, `mailcow-directory`, `server-manager`, `monitoring-stack`, `credentials`.
+
+Failure notifications include the real error (`last_error`) plus a tail of the application log — never just "operation returned false". A broken `settings.yaml` raises `ConfigError` and exits with code 2 instead of silently using defaults.
+
+## Scheduling
+
+All cron entries are managed by `lib/scheduling.py` (TUI: Scheduling & Automation). The crontab writer:
+
+- Backs up the previous crontab to `schedules/crontab.backup.<timestamp>` (last 5 kept)
+- **Preserves** unrecognized lines (`@reboot`, env vars, comments, foreign jobs) instead of dropping them
+- Validates cron schedule expressions before writing
+
+Standard schedule:
+
+| Job | Schedule |
+|-----|----------|
+| Backup queue (6 services, spaced) | Nightly window 01:55–05:30 |
+| Backup cleanup | Weekly |
+| Borg integrity check (all repos) | `0 6 1 * *` (1st of month, 06:00) |
+| Gandi token renewal check | Daily 12:00 |
+| Certificate sync + TLSA update | Daily 04:00 |
+| Weekly summary email | Sunday 08:00 |
+
+All jobs run under `flock` to prevent overlap. A full `check all` takes ~18 minutes for 6 repositories.
 
 ## Installation
 
-### Quick Install (Recommended)
-
-The easiest way to install Server Manager on a fresh VPS:
+### Quick Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | bash
 ```
 
-This automated installer will:
-- Install all system dependencies
-- Set up Python virtual environment
-- Download the latest Server Manager code
-- Configure the application
-- Create the `server-manager` command
-
-For detailed bootstrap documentation, see: [bootstrap/README.md](bootstrap/README.md)
-
 ### Manual Installation
 
-If you prefer manual installation:
-
-#### Prerequisites
-
-- Root access
-- Python 3.9 or higher
-- Ubuntu/Debian-based system
-
-#### Install System Dependencies
-
 ```bash
-# Install dialog for TUI
-apt-get install -y dialog
-
-# Install Borg Backup
-apt-get install -y borgbackup
-
-# Install rsync
-apt-get install -y rsync
-
-# Install Docker
-apt-get install -y docker.io docker-compose
-
-# Install other tools
-apt-get install -y git python3 python3-venv python3-pip
-```
-
-#### Install Python Dependencies
-
-```bash
+apt-get install -y dialog borgbackup rsync git python3 python3-venv python3-pip
+git clone https://github.com/mikael-herrgard/strato-server-manager.git /opt/server-manager
 cd /opt/server-manager
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
@@ -70,381 +101,121 @@ venv/bin/pip install -r requirements.txt
 
 ## Configuration
 
-1. Copy the example configuration:
-```bash
-cd /opt/server-manager/config
-cp settings.yaml.example settings.yaml
-```
+1. Copy and edit the config templates:
+   ```bash
+   cd /opt/server-manager/config
+   cp settings.yaml.example settings.yaml
+   ```
 
-2. Edit `settings.yaml` with your specific values:
-```bash
-nano settings.yaml
-```
+2. Borg passphrase in `/root/.env`:
+   ```bash
+   echo "BORG_PASSPHRASE='your-secure-passphrase'" > /root/.env
+   chmod 600 /root/.env
+   ```
 
-3. Set up the Borg passphrase in `/root/.env`:
-```bash
-echo "BORG_PASSPHRASE='your-secure-passphrase'" > /root/.env
-chmod 600 /root/.env
-```
+3. SSH access to the backup host. The backup host is addressed via the `rsync-backup` alias in `/root/.ssh/config`, using a dedicated key (`/root/.ssh/rsync.key`). **Important on IPv6-disabled hosts:** force IPv4, or SSH will hang on the backup provider's AAAA record:
+   ```
+   Host rsync-backup
+       HostName <backup-host>
+       User <backup-user>
+       IdentityFile /root/.ssh/rsync.key
+       AddressFamily inet
+   ```
 
-4. Set up SSH key for rsync server:
-```bash
-ssh-keygen -t ed25519 -f /root/.ssh/backup_key -N ""
-ssh-copy-id -i /root/.ssh/backup_key root@rsync-backup
-```
-
-## Usage
-
-### Run the Application
-
-```bash
-/opt/server-manager/server_manager.py
-```
-
-Or create a symlink for easier access:
-```bash
-ln -s /opt/server-manager/server_manager.py /usr/local/bin/server-manager
-server-manager
-```
-
-### Navigation
-
-- Use arrow keys to navigate menus
-- Press Enter to select
-- Press Esc or select "Back" to return to previous menu
-- Select "Exit" from main menu to quit
-
-## Features
-
-### Completed Features (Phases 1-6) ✅
-
-**Phase 1: Foundation**
-- ✅ Professional TUI interface with pythondialog
-- ✅ Configuration management (YAML)
-- ✅ Comprehensive logging system
-- ✅ System information display
-- ✅ Prerequisites checking
-
-**Phase 2: Backup System**
-- ✅ Backup nginx with Borg deduplication
-- ✅ Backup Mailcow (full/config/mail/db types)
-- ✅ Backup application files
-- ✅ Backup verification and status
-- ✅ Rsync to remote server
-
-**Phase 3: Restore System**
-- ✅ Restore nginx from backup
-- ✅ Restore Mailcow with type selection
-- ✅ Restore application files
-- ✅ List and select from available backups
-- ✅ Automatic service restart after restore
-
-**Phase 4: Installation & System Configuration**
-- ✅ Automated Docker installation
-- ✅ Automated Mailcow installation
-- ✅ Automated nginx Proxy Manager installation
-- ✅ IPv6 disable/enable via GRUB
-- ✅ UFW firewall configuration
-
-**Phase 5: Maintenance & Monitoring**
-- ✅ Update nginx with rollback capability
-- ✅ Update Mailcow via official script
-- ✅ System package updates
-- ✅ Docker cleanup operations
-- ✅ Service status monitoring
-- ✅ Container statistics
-- ✅ Disk usage tracking
-
-**Phase 6: Scheduling & Automation**
-- ✅ Cron job management (no manual editing)
-- ✅ Automated backup scheduling
-- ✅ Automated cleanup scheduling
-- ✅ Email notifications (SMTP)
-- ✅ Test notifications
-- ✅ Schedule viewing and management
-
-### In Progress
-
-**Phase 7: Disaster Recovery**
-- ✅ Bootstrap installation system
-- ⏳ Automated recovery mode
-- ⏳ Complete DR testing on test VPS
-- ⏳ Recovery runbook documentation
-
-**Phase 8: Testing & Documentation**
-- ⏳ Unit tests for critical functions
-- ⏳ Integration tests
-- ⏳ Security audit
-- ⏳ Performance testing
-- ⏳ Complete user documentation
+Key settings live in `config/settings.yaml` (paths, Borg retention/compression, remote path) — see `settings.yaml.example`.
 
 ## Directory Structure
 
 ```
 /opt/server-manager/
-├── server_manager.py          # Main application entry point
-├── requirements.txt           # Python dependencies
+├── server_manager.py          # TUI entry point
+├── cli.py                     # CLI entry point (cron / DR)
 ├── config/
-│   ├── settings.yaml         # Configuration (create from .example)
-│   └── settings.yaml.example # Configuration template
-├── lib/                      # Core application modules
-│   ├── __init__.py
-│   ├── config.py            # Configuration management
-│   ├── ui.py                # TUI interface
-│   └── utils.py             # Utility functions
-├── logs/
-│   └── server-manager.log   # Application logs
-└── state/
-    └── first_run            # First run marker
+│   ├── settings.yaml          # Main config (create from .example)
+│   └── notifications.yaml     # Email notification config
+├── lib/
+│   ├── borg.py                # BorgRepoBase — shared Borg plumbing (repos, create/verify/prune/list/check)
+│   ├── backup.py              # BackupManager (per-service backup flows)
+│   ├── restore.py             # RestoreManager (safe extract-then-swap restores)
+│   ├── scheduling.py          # Crontab management (safe rewrite, validation)
+│   ├── maintenance.py         # Updates, cleanup
+│   ├── monitoring.py          # Status and stats
+│   ├── notifications.py       # Email (SMTP via local relay)
+│   ├── installation.py        # Docker/Mailcow/NPM installers
+│   ├── config.py              # ConfigManager + ConfigError
+│   ├── ui.py / utils.py       # TUI plumbing, shared helpers
+│   └── handlers/              # TUI menu handlers (spec-driven dispatch)
+├── scripts/                   # Cron wrappers + operational scripts
+│   ├── automated-backup.sh    # Cron entry for nightly backups
+│   ├── borg-check.sh          # Cron entry for monthly integrity check
+│   ├── cleanup-backups.sh     # Cron entry for cleanup
+│   ├── sync-mailcow-certs.sh  # Cert sync + TLSA rotation
+│   ├── weekly-summary.sh      # Sunday status email
+│   └── ...
+├── bootstrap/                 # Fresh-VPS installer
+├── docs/                      # Project documentation
+├── logs/                      # server-manager.log (rotated)
+├── schedules/                 # Crontab backups (not in git)
+└── state/                     # Runtime state (not in git)
 ```
-
-## Configuration Reference
-
-### Rsync Configuration
-```yaml
-rsync:
-  host: rsync-backup              # Hostname of rsync server
-  user: root                       # SSH user
-  base_path: /backups              # Remote path for backups
-  ssh_key: /root/.ssh/backup_key   # SSH private key
-```
-
-### Borg Configuration
-```yaml
-borg:
-  remote_path: borg14              # Borg binary on remote
-  compression: zstd,3              # Compression algorithm
-  retention:
-    daily: 7                       # Keep 7 daily backups
-    weekly: 4                      # Keep 4 weekly backups
-    monthly: 6                     # Keep 6 monthly backups
-```
-
-### Backup Schedule
-```yaml
-backup:
-  schedule:
-    nginx: "0 2 * * *"      # 2 AM daily
-    mailcow: "0 3 * * *"    # 3 AM daily
-    scripts: "0 4 * * 0"    # 4 AM Sunday
-```
-
-## Logging
-
-Logs are written to:
-- `/opt/server-manager/logs/server-manager.log` (rotated, max 10MB, 5 backups)
-- System syslog (warnings and errors only)
-
-View logs from within the application:
-- Main Menu → Status & Monitoring → View Logs
 
 ## Disaster Recovery
 
-Server Manager provides a complete disaster recovery system for quickly rebuilding your VPS from backups.
+Full DR is a **two-phase `init.sh`** flow (kept **offline**, not in this repository — it embeds secrets):
 
-### Quick Recovery Process
+1. **Phase 1 (interactive)**: hostname, SSH keys, packages, Server Manager install, credential recovery from Borg, IPv6 disable → reboot
+2. **Phase 2 (automatic, systemd oneshot)**: Docker install, backup cron scheduling (including the monthly borg check), `cli.py restore-all --yes`, IP reconciliation (NPM configs, DNS A/SPF/TLSA updates)
 
-If your VPS fails and you need to rebuild:
+Measured on a fresh Ubuntu 24.04 VPS: **~12–15 minutes** from bare VPS to all containers and services running. The only manual post-DR step is requesting PTR/rDNS from the hosting provider.
 
-#### 1. Deploy Fresh VPS
-- Deploy new Ubuntu 22.04 LTS VPS
-- Ensure same or similar specifications as original
-- Configure DNS to point to new VPS IP
+Without `init.sh`, the same result can be achieved manually: install via bootstrap, restore credentials, then `cli.py restore-all --yes`. Restore order (handled automatically by `restore-all`): server-manager → nginx → mailcow-directory → mailcow → monitoring-stack.
 
-#### 2. Run Bootstrap Installer
-On the fresh VPS, run:
-```bash
-curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | bash
-```
+### Restore safety
 
-The installer will:
-- Install all required system packages
-- Set up Python environment
-- Download Server Manager
-- Prompt to copy configuration from existing backup server
+- Archives are **extracted and verified first**; the live installation is only touched afterwards
+- A pre-restore safety copy is taken; if it fails, the restore **aborts** with services restarted
+- Mailcow restore uses mailcow's official restore script, including native `backup_mysql.gz` DB restore
 
-**Important:** When prompted, choose to copy configuration from your backup server. You'll need SSH access to the backup server to retrieve your configuration files.
+### Prerequisites for recovery (keep these OFF-server)
 
-#### 3. Restore Services
-Once installed, launch Server Manager:
-```bash
-server-manager
-```
+- `init.sh` (refresh your offline copy whenever it changes!)
+- Borg passphrase
+- SSH key for the backup host
 
-Then restore your services in order:
+## Notifications
 
-**a) Restore nginx:**
-- Navigate to: **Restore Management → Restore nginx**
-- Select latest backup or specific date
-- Wait for restoration to complete
-
-**b) Restore Mailcow:**
-- Navigate to: **Restore Management → Restore Mailcow**
-- Select backup type (full recommended)
-- Select latest backup or specific date
-- Wait for restoration to complete
-
-#### 4. Verify Services
-- Navigate to: **Status & Monitoring → Service Status**
-- Verify all Docker containers are running
-- Test nginx: `curl -I http://localhost`
-- Test Mailcow: Check webmail interface
-
-#### 5. Update DNS (if needed)
-If VPS IP changed:
-- Update A/AAAA records for your domains
-- Wait for DNS propagation (5-30 minutes)
-
-### Expected Recovery Time
-
-| Task | Estimated Time |
-|------|----------------|
-| Deploy fresh VPS | 5-10 minutes |
-| Run bootstrap installer | 10-15 minutes |
-| Restore nginx | 5-10 minutes |
-| Restore Mailcow | 15-30 minutes |
-| Verify services | 5-10 minutes |
-| **Total** | **40-75 minutes** |
-
-### Prerequisites for Recovery
-
-Before disaster strikes, ensure you have:
-
-1. **Regular Backups Running**
-   - Configure automated backups: **Scheduling & Automation → Schedule Backup**
-   - Verify backups are reaching remote server
-   - Test backups periodically
-
-2. **Backup Server Access**
-   - SSH access to your backup/rsync server
-   - Backup server must remain operational
-   - Know the location of your backups
-
-3. **Configuration Backup**
-   - Keep a copy of `/opt/server-manager/config/settings.yaml`
-   - Keep a copy of `/root/.env` (Borg passphrase)
-   - Keep a copy of SSH keys for backup server access
-
-4. **Documentation**
-   - Note your domain names
-   - Note your DNS provider and login
-   - Note your backup server IP/hostname
-
-### Testing Your DR Plan
-
-**Before you need it**, test your disaster recovery:
-
-1. Deploy a test VPS
-2. Run the bootstrap installer
-3. Restore from your latest backups
-4. Verify all services work
-5. Document any issues or customizations needed
-
-This ensures your backups are valid and the process works.
-
-### Manual Recovery (Without Bootstrap)
-
-If you cannot use the bootstrap installer:
-
-1. Install system packages manually (see [bootstrap/README.md](bootstrap/README.md))
-2. Clone repository: `git clone https://github.com/mikael-herrgard/strato-server-manager.git /opt/server-manager`
-3. Create venv: `cd /opt/server-manager && python3 -m venv venv`
-4. Install dependencies: `venv/bin/pip install -r requirements.txt`
-5. Copy configuration from backup server
-6. Create symlink: `ln -s /opt/server-manager/server_manager.py /usr/local/bin/server-manager`
-7. Run: `server-manager`
-
-### Backup Server Configuration
-
-Your backup server (rsync/Borg target) should:
-- Have sufficient disk space (3-5x your data size)
-- Be in a different physical location or provider
-- Have regular monitoring
-- Have its own backup strategy
-- Be accessible via SSH from your VPS
-
-### Troubleshooting Recovery
-
-**Bootstrap fails:**
-- Check log file: `/tmp/server-manager-bootstrap-*.log`
-- Verify internet connectivity
-- Ensure running as root
-- Try manual installation instead
-
-**Cannot connect to backup server:**
-- Verify SSH key authentication works
-- Check firewall rules on backup server
-- Verify backup server is online
-- Check settings.yaml has correct hostname
-
-**Restore fails:**
-- Verify Borg passphrase in `/root/.env` is correct
-- Check backup actually exists on remote server
-- Verify sufficient disk space on VPS
-- Check Server Manager logs: `/opt/server-manager/logs/`
-
-**Services won't start after restore:**
-- Check Docker is running: `systemctl status docker`
-- Review service logs: **Status & Monitoring → View Logs**
-- Verify restored files have correct permissions
-- Check for port conflicts: `netstat -tulpn`
-
-### Advanced: Automated Recovery
-
-For fully automated recovery (coming in Phase 7):
-```bash
-curl -fsSL https://raw.githubusercontent.com/mikael-herrgard/strato-server-manager/main/bootstrap/install.sh | \
-  SKIP_CONFIRM=true AUTO_RESTORE=true bash
-```
-
-This will perform a complete unattended recovery using your latest backups.
-
-For detailed bootstrap documentation, see: [bootstrap/README.md](bootstrap/README.md)
+- Per-backup success/failure emails (failures include real error + log tail)
+- Monthly borg check failure alerts with per-repository errors
+- Weekly HTML summary email (system health, security, mail, backups, TLS, Docker)
+- Delivered via local msmtp relay through Mailcow's Postfix
 
 ## Troubleshooting
 
-### Dialog not found
+**SSH to backup host fails or hangs**
 ```bash
-apt-get install -y dialog
+ssh -vvv rsync-backup echo ok
+```
+- If it hangs: check `AddressFamily inet` is set (IPv6-disabled hosts)
+- The backup provider can be transiently flaky (slow handshakes, connection resets); the SSH pre-check retries once with generous timeouts. Treat isolated failures as transient before debugging locally.
+
+**Backup failed email** — the email now contains the actual error and log tail. Re-run manually:
+```bash
+flock -n /tmp/backup-<service>.lock /opt/server-manager/scripts/automated-backup.sh <service> --verify
 ```
 
-### Python module not found
-```bash
-cd /opt/server-manager
-pip3 install -r requirements.txt
-```
+**Listing backups fails vs. empty repo** — `cli.py restore <service> --list` distinguishes "Listing failed: <error>" from "No backups found."
 
-### Permission denied
-Ensure you're running as root:
-```bash
-sudo /opt/server-manager/server_manager.py
-```
+**Restore fails**
+- Verify Borg passphrase in `/root/.env`
+- Check `/opt/server-manager/logs/server-manager.log`
+- Verify sufficient disk space (staging happens under `/var/backups/local`)
 
-### SSH connection to rsync server fails
-Test SSH connection:
-```bash
-ssh -i /root/.ssh/backup_key root@rsync-backup
-```
+**Broken settings.yaml** — the CLI exits with code 2 and a `Configuration error:` message rather than running with defaults.
 
 ## Development
 
-### Project Phases
-
-1. **Phase 1**: Foundation ✅ COMPLETE
-2. **Phase 2**: Backup System ✅ COMPLETE
-3. **Phase 3**: Restore System ✅ COMPLETE
-4. **Phase 4**: Installation & System Config ✅ COMPLETE
-5. **Phase 5**: Maintenance & Monitoring ✅ COMPLETE
-6. **Phase 6**: Scheduling & Automation ✅ COMPLETE
-7. **Phase 7**: Disaster Recovery ⏳ IN PROGRESS (Bootstrap system complete)
-8. **Phase 8**: Testing & Documentation ⏳ PENDING
-
-See `PROJECT_STATUS.md` for detailed project status and remaining work.
+Single-developer project; work is committed directly to `main`. See `docs/PROJECT_STATUS.md` for detailed status and history.
 
 ## License
 
 Internal use only.
-
-## Author
-
-Server Administrator

@@ -1,8 +1,8 @@
 # Server Manager - Project Status Report
 
-**Date:** 2026-02-18
-**Version:** 1.2
-**Status:** Core Implementation Complete + DR Tested
+**Date:** 2026-07-04
+**Version:** 1.3
+**Status:** Core Implementation Complete + DR Tested + Hardened
 
 ## Executive Summary
 
@@ -21,6 +21,10 @@ The Server Manager project has successfully completed **Phases 1-6** of the orig
 **Gandi Token Auto-Renewal (Feb 2026):** Created `gandi-token-renew.sh` for automated Gandi PAT renewal. Checks expiry daily at 12:00 via `GET /tokeninfo`; when <=30 days remaining, renews via `POST /v5/organization/access-tokens`. Atomically updates `.credentials.env` (with `.previous` backup and rollback on verification failure), syncs certbot `credentials-gandi` file. Tiered notifications: INFO on success, WARNING on failure with >7 days left, ERROR when <=7 days. Added `schedule_gandi_token_renewal()` to scheduling.py and integrated into init.sh Phase 2. Seeded `credentials-gandi` certbot credential file for Gandi DNS challenges.
 
 **Gandi Domain Setup Automation (Feb 2026):** Created `setup-gandi-domain.sh` — fully automated DNS zone setup for mail domains transferred to Gandi. Performs 8 prerequisite checks (credentials, API token, Gandi domain, Mailcow domain, DKIM key, mail host resolution, tools), creates 18 DNS records via LiveDNS API (A, mail A, MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, autoconfig/autodiscover CNAMEs, 6 SRVs, CAA), activates LiveDNS nameservers, enables DNSSEC with DS record publication, and verifies records via dig. Integrated into TUI (Maintenance → Setup Gandi Domain) with input dialog, confirmation, progress display, scrollable output, and manual steps checklist. Tested on keken.nu with full delete + recreate cycle. Also deployed `security.txt` at `/opt/mailcow-dockerized/data/web/.well-known/security.txt` (shared by all Mailcow domains) and documented NPM security header configuration (proxy_hide_header + more_set_headers) to fix HSTS/Referrer-Policy/CSP for internet.nl compliance. Website test score: 86% (ceiling due to IPv6 disabled by design and Mailcow CSP constraints).
+
+**Reliability & Refactor Update (Jul 2026):** Triggered by a backup failure investigation (backup host returned an IPv6 AAAA record while the server runs IPv6-disabled; fixed with `AddressFamily inet` in ssh config). Follow-up hardening: SSH pre-check now tolerant of slow backup host (ConnectTimeout 15s, 45s hard timeout, one retry); backup failure emails carry the real error (`last_error`) plus a log tail; restores extract-then-swap instead of delete-then-extract and abort if the pre-restore safety copy fails; broken `settings.yaml` raises `ConfigError` (CLI exit 2) instead of silently using defaults. Major refactor: shared Borg plumbing extracted into `lib/borg.py` (`BorgRepoBase`); per-service backup methods collapsed into a generic `_backup_service()` flow; directory restores collapsed into `_restore_directory_service()`; TUI backup/restore handlers rebuilt as spec-driven dispatch tables (~740 duplicated lines removed). New features: monthly `borg check` of all 6 repositories (`cli.py check`, cron 1st of month 06:00, measured 17m38s full run); crontab rewrites now back up the previous crontab (last 5 kept) and preserve unmanaged lines instead of dropping them; cron expression validation; cleanup extended to monitoring-stack paths and stray backup files. Restore picker now shows the 10 newest (was oldest) archives.
+
+**Mailcow DB Backup Fix (Jul 2026):** Discovered that **no mailcow archive had ever contained the MySQL database** — mailcow's official backup script runs its mariadb backup in a `docker run` with `--sysctl net.ipv6.conf.all.disable_ipv6=1`, which fails instantly on this kernel-IPv6-disabled host and is silently skipped (also the explanation for the Feb DR test's "mailcow restore exits 1" note). Fix: `BackupManager._dump_mailcow_db()` dumps the DB via `docker exec mysqldump --single-transaction` into the backup directory as `backup_mysql.gz` — the filename mailcow's official restore script consumes natively. Password passed via env inside the container (kept out of logs/argv), dump validated for the completion marker, backup fails loudly if the dump fails. Automated restore feeds the extra MySQL confirmation prompt. Verified end-to-end in production: archive now contains vmail + crypt keys + Redis + Rspamd + Postfix queue + mailcow.conf + DB dump (54 tables).
 
 ## Completed Phases ✅
 
@@ -403,33 +407,34 @@ Only manual step after init.sh completes: request PTR/rDNS from hosting provider
 
 | Metric | Value |
 |--------|-------|
-| **Total Python Lines** | ~8,300 lines (20 files) |
-| **Core Modules** | 9 files |
+| **Total Python Lines** | ~9,200 lines (22 files, as of Jul 2026) |
+| **Core Modules** | 12 files (incl. new `lib/borg.py`) |
 | **Handler Modules** | 7 files (incl. `__init__.py`) |
-| **CLI Entry Point** | 1 file (cli.py - 145 lines) |
-| **Shell Scripts** | 7 files (~1,760 lines total incl. bootstrap) |
+| **CLI Entry Point** | 1 file (cli.py - 384 lines) |
+| **Shell Scripts** | ~3,370 lines total (scripts/ + bootstrap/) |
 | **Configuration Files** | 2 files (settings.yaml, notifications.yaml) |
-| **Main Application** | 511 lines |
+| **Main Application** | 517 lines |
 
 ### File Breakdown
 
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| `lib/ui.py` | 682 | TUI interface |
-| `cli.py` | 145 | CLI entry point for cron |
-| `lib/backup.py` | 772 | Backup operations |
-| `lib/restore.py` | 998 | Restore operations |
+| `lib/ui.py` | 685 | TUI interface |
+| `cli.py` | 384 | CLI entry point for cron/DR (backup, restore, restore-all, check, cleanup) |
+| `lib/borg.py` | 438 | BorgRepoBase — shared Borg plumbing (create/verify/prune/list/check) |
+| `lib/backup.py` | 509 | Backup operations (generic flow + per-service specifics) |
+| `lib/restore.py` | 943 | Restore operations (extract-then-swap) |
 | `lib/installation.py` | 399 | Installation automation |
-| `lib/scheduling.py` | 513 | Cron management |
-| `lib/maintenance.py` | 635 | Update operations |
-| `lib/notifications.py` | 461 | Email alerts |
-| `lib/monitoring.py` | 532 | Status monitoring |
-| `lib/config.py` | 320 | Config management |
-| `lib/utils.py` | 486 | Utilities (incl. systemd helpers) |
-| **Handler Files** | ~2,055 | Menu operations (7 files) |
-| **Scripts** | ~1,280 | Shell scripts (5 in scripts/) |
-| **Bootstrap** | ~485 | Bootstrap/install scripts |
-| **Main App** | 511 | TUI entry point |
+| `lib/scheduling.py` | 752 | Cron management (safe rewrite, preservation, validation) |
+| `lib/maintenance.py` | 675 | Update + cleanup operations |
+| `lib/notifications.py` | 462 | Email alerts |
+| `lib/monitoring.py` | 525 | Status monitoring |
+| `lib/config.py` | 350 | Config management + ConfigError |
+| `lib/utils.py` | 509 | Utilities (systemd helpers, tolerant SSH check) |
+| **Handler Files** | ~2,065 | Menu operations (7 files, spec-driven dispatch) |
+| **Scripts** | ~2,850 | Shell scripts (13 in scripts/) |
+| **Bootstrap** | ~520 | Bootstrap/install scripts |
+| **Main App** | 517 | TUI entry point |
 
 ### Feature Completeness
 
@@ -468,7 +473,7 @@ Only manual step after init.sh completes: request PTR/rDNS from hosting provider
 |-----|----------|--------|------------|
 | **~~Full end-to-end DR test~~** | ~~MEDIUM~~ | ~~Untested on truly fresh VPS~~ | ✅ DONE — tested on fresh Ubuntu 24.04 VPS (Feb 18) |
 | **Unit Tests** | MEDIUM | Bugs may go unnoticed | Thorough manual and DR testing |
-| **Documentation** | MEDIUM | Users may struggle | Inline help, README, init.sh runbook |
+| **~~Documentation~~** | ~~MEDIUM~~ | ~~Users may struggle~~ | ✅ DONE — README rewritten Jul 2026 (CLI, backup contents, DR, troubleshooting) |
 
 ## Recommendations
 
@@ -476,10 +481,7 @@ Only manual step after init.sh completes: request PTR/rDNS from hosting provider
 
 1. **~~Full End-to-End DR Test~~** ✅ DONE (Feb 18 — fresh VPS, all 6 services, ~8 min total)
 
-2. **User Documentation**
-   - Update README.md with CLI restore usage
-   - Add quickstart guide
-   - Document common tasks
+2. **~~User Documentation~~** ✅ DONE (Jul 2026 — README rewritten: CLI usage, backup contents, scheduling, DR flow, troubleshooting)
 
 3. **Security Review**
    - Review credential storage
@@ -505,7 +507,8 @@ Only manual step after init.sh completes: request PTR/rDNS from hosting provider
 |------|------------|--------|-------------------|
 | **Untested disaster recovery** | LOW | HIGH | ✅ TESTED (all 6 services restored on production, Feb 2026) |
 | **Missing documentation** | MEDIUM | MEDIUM | ⚠️ IN PROGRESS |
-| **Backup corruption** | LOW | HIGH | ✅ MITIGATED (verification) |
+| **Backup corruption** | LOW | HIGH | ✅ MITIGATED (per-backup verification + monthly `borg check` of all repos since Jul 2026) |
+| **Silent partial backups** | LOW | HIGH | ✅ MITIGATED (mailcow DB dump gap found & fixed Jul 2026; failures now email real errors) |
 | **Rsync server failure** | MEDIUM | HIGH | ⚠️ NEEDS SECONDARY |
 | **Security vulnerabilities** | LOW | HIGH | ⚠️ NEEDS AUDIT |
 | **Missing features** | LOW | LOW | ✅ ACCEPTABLE (optional) |
@@ -525,15 +528,18 @@ The Server Manager has **successfully implemented the core functionality** with:
 - ✅ Modular, maintainable architecture
 - ✅ Proper CLI entry point for backup, restore, and cleanup (cli.py)
 - ✅ Flock-based cron mutex and logrotate
-- ✅ One-touch DR script (init.sh) — single script restores entire server stack from bare VPS (~8 min)
+- ✅ One-touch DR script (init.sh) — single script restores entire server stack from bare VPS (~12-15 min)
+- ✅ Monthly Borg repository integrity check with email alerts (Jul 2026)
+- ✅ Complete mailcow backups incl. MySQL DB dump (gap fixed Jul 2026)
+- ✅ Safe crontab rewrites (backup + preservation of unmanaged entries, Jul 2026)
+- ✅ Deduplicated codebase: shared BorgRepoBase, generic backup/restore flows, spec-driven TUI handlers (Jul 2026)
 
 **The application is production-ready** with automated daily backups and tested disaster recovery.
 
 ### What's Missing 🚧
 
 The remaining gaps are minor:
-- ℹ️ **Unit/integration tests** (quality assurance, Phase 8)
-- ℹ️ **User documentation** (README covers basics, no detailed user guide yet)
+- ℹ️ **Unit/integration tests** (quality assurance, Phase 8) — prime candidates: crontab parser/renderer, cron expression validation, config parsing
 
 ### Recommendation 🎯
 
@@ -547,14 +553,14 @@ The application is **ready for production use** with:
 - ✅ CLI and TUI restore paths
 
 **Optional next steps:**
-1. User documentation
-2. Unit tests (Phase 8)
+1. Unit tests for pure logic (Phase 8)
+2. Re-run a DR test (sandbox or temp-VPS) to exercise the Jul 2026 refactor and native DB restore
 
 ---
 
-**Project Status:** ✅ **CORE COMPLETE + DR TESTED** - Phases 1-7 Done, Phase 8 Pending
+**Project Status:** ✅ **CORE COMPLETE + DR TESTED + HARDENED** - Phases 1-7 Done, Phase 8 Pending
 **Production Ready:** ✅ **YES**
-**Recommended Next Step:** User documentation and unit tests (Phase 8)
+**Recommended Next Step:** Unit tests (Phase 8); periodic DR re-test
 
-**Last Updated:** 2026-02-22
-**Version:** 1.2
+**Last Updated:** 2026-07-04
+**Version:** 1.3

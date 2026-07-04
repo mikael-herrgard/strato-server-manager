@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Date:** 2025-12-31
-**Status:** Planning Phase
+**Status:** HISTORICAL — original planning document, kept for reference. For current status see [PROJECT_STATUS.md](PROJECT_STATUS.md); for usage see the main [README](../README.md).
 
 ## Executive Summary
 

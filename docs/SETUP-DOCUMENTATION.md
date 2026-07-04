@@ -947,20 +947,27 @@ cd /opt/mailcow-dockerized
 
 ### 11.3 Backup Strategy
 
-**Critical files to backup:**
-```
-/opt/mailcow-dockerized/mailcow.conf
-/opt/mailcow-dockerized/data/conf/
-/opt/mailcow-dockerized/data/assets/ssl/
-/opt/mailcow-dockerized/update-tlsa-cloudflare.sh
-/root/nginx/data/
+Backups are fully automated by Server Manager (`/opt/server-manager`): 6 Borg services back up nightly (01:55–05:30 window) to a remote repository over SSH, with per-backup verification, pruning (7 daily / 4 weekly / 6 monthly), email notifications, and a monthly `borg check` of all repositories (1st of month, 06:00).
+
+| Borg service | Contents |
+|--------------|----------|
+| `credentials` | `/root/.credentials.env`, `/root/.dns-config` |
+| `nginx` | `/root/nginx` (NPM data, certs, proxy DB) |
+| `mailcow` | Full mail data: vmail (all emails), crypt keys, Redis, Rspamd, Postfix queue, mailcow.conf, **MySQL dump** (`backup_mysql.gz`) |
+| `mailcow-directory` | `/opt/mailcow-dockerized` (compose, config overrides) |
+| `server-manager` | Server Manager config |
+| `monitoring-stack` | Grafana + InfluxDB data/config |
+
+**Note (Jul 2026):** mailcow's built-in backup script silently skips the MySQL database on this host (its `docker run --sysctl net.ipv6...` flag fails with kernel IPv6 disabled). Server Manager dumps the DB itself into the backup as `backup_mysql.gz`, which mailcow's official restore script consumes natively.
+
+**Manual backup/restore:**
+```bash
+cd /opt/server-manager
+venv/bin/python3 cli.py backup <service> --verify
+venv/bin/python3 cli.py restore <service> --list
 ```
 
-**Mailcow built-in backup:**
-```bash
-# Mailcow admin interface: Configuration → Backup & Restore
-# Or use external backup solution
-```
+See `/opt/server-manager/README.md` for full backup/restore/DR documentation.
 
 ### 11.4 Log Files
 
@@ -1312,6 +1319,7 @@ curl https://mta-sts.villaherrgard.com/.well-known/mta-sts.txt
 | 1.1 | 2026-01-10 | Added TLSA automation |
 | 1.2 | 2026-01-11 | Added SRV records, combined certificate, Chrome warning notes |
 | 1.3 | 2026-04-12 | Replaced broken in-container deploy hook with host-side cron sync script |
+| 1.4 | 2026-07-04 | Rewrote backup strategy section to document the automated 6-service Borg system, monthly integrity check, and the mailcow MySQL dump fix |
 
 ---
 
