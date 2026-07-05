@@ -71,10 +71,9 @@ def cmd_backup(args):
             log_tail = get_log_tail()
             if log_tail:
                 details['output'] = f"Last {log_tail.count(chr(10))} log lines from {LOG_FILE}:\n{log_tail}"
-            try:
-                notif_mgr.send_backup_notification(service, False, details)
-            except Exception as ne:
-                print(f"Warning: Failed to send failure notification: {ne}")
+            if not notif_mgr.send_backup_notification(service, False, details):
+                print("WARNING: failure notification was NOT delivered — "
+                      "check logs and /opt/server-manager/state/failed-notifications/")
             sys.exit(1)
 
     except Exception as e:
@@ -84,10 +83,9 @@ def cmd_backup(args):
         log_tail = get_log_tail()
         if log_tail:
             details['output'] = f"Last {log_tail.count(chr(10))} log lines from {LOG_FILE}:\n{log_tail}"
-        try:
-            notif_mgr.send_backup_notification(service, False, details)
-        except Exception as ne:
-            print(f"Warning: Failed to send error notification: {ne}")
+        if not notif_mgr.send_backup_notification(service, False, details):
+            print("WARNING: failure notification was NOT delivered — "
+                  "check logs and /opt/server-manager/state/failed-notifications/")
         sys.exit(1)
 
 
@@ -247,10 +245,9 @@ def cmd_check(args):
         log_tail = get_log_tail()
         if log_tail:
             details['log_tail'] = f"\n{log_tail}"
-        try:
-            notif_mgr.send_maintenance_notification("Borg Repository Check", False, details)
-        except Exception as ne:
-            print(f"Warning: Failed to send failure notification: {ne}")
+        if not notif_mgr.send_maintenance_notification("Borg Repository Check", False, details):
+            print("WARNING: failure notification was NOT delivered — "
+                  "check logs and /opt/server-manager/state/failed-notifications/")
         sys.exit(1)
 
 
@@ -277,17 +274,18 @@ def cmd_cleanup(args):
         print(f"  Files removed: {files_removed}")
         print(f"  Space freed: {size_str}")
 
-        if stats['backups_removed'] > 0 or files_removed > 0:
-            notif_mgr.send_maintenance_notification(
-                "Backup Cleanup",
-                stats['success'],
-                {
-                    'directories_removed': stats['backups_removed'],
-                    'files_removed': files_removed,
-                    'space_freed': size_str,
-                    'retention_days': retention_days,
-                }
-            )
+        # Notify on any activity, and always on failure — a cleanup that
+        # fails before removing anything must not be silent
+        if not stats['success'] or stats['backups_removed'] > 0 or files_removed > 0:
+            details = {
+                'directories_removed': stats['backups_removed'],
+                'files_removed': files_removed,
+                'space_freed': size_str,
+                'retention_days': retention_days,
+            }
+            if not stats['success'] and stats.get('error'):
+                details['error'] = stats['error']
+            notif_mgr.send_maintenance_notification("Backup Cleanup", stats['success'], details)
 
         sys.exit(0 if stats['success'] else 1)
 
@@ -377,6 +375,24 @@ def main():
         args.func(args)
     except ConfigError as e:
         print(f"Configuration error: {e}")
+        # A broken settings.yaml kills every cron job within seconds, so it
+        # must be emailed. NotificationManager deliberately does not read
+        # settings.yaml, so it still works here.
+        try:
+            sent = NotificationManager().send_custom_notification(
+                subject="Server Manager configuration is broken",
+                message=(
+                    f"The '{args.command}' command aborted with a configuration error:\n\n"
+                    f"  {e}\n\n"
+                    f"ALL automated jobs (backups, checks, cleanup) will keep "
+                    f"failing until settings.yaml is fixed."
+                ),
+                level="ERROR",
+            )
+            if not sent:
+                print("WARNING: configuration-error notification was NOT delivered")
+        except Exception as ne:
+            print(f"WARNING: could not send configuration-error notification: {ne}")
         sys.exit(2)
 
 

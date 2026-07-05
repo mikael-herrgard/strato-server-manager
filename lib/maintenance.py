@@ -569,6 +569,7 @@ class MaintenanceManager:
 
         except Exception as e:
             logger.error(f"Backup cleanup failed: {e}")
+            stats['error'] = str(e)
             return stats
 
     def check_updates_available(self) -> Dict[str, any]:

@@ -5,21 +5,35 @@ Handles email notifications for automated tasks
 
 import os
 import smtplib
+import subprocess
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from typing import Optional, Dict, List
 from pathlib import Path
 from .utils import logger
-from .config import get_config
+
+# Where a notification is written when every delivery path fails, so it is
+# never lost entirely (weekly summary reports this directory when non-empty).
+FAILED_NOTIFICATION_DIR = Path("/opt/server-manager/state/failed-notifications")
+
+# Last-resort recipient for the msmtp fallback when the notification config
+# itself is broken and to_emails is unknown (same address the standalone
+# alert scripts use).
+FALLBACK_ALERT_RECIPIENT = "micke@nysattra.se"
 
 
 class NotificationManager:
     """Manages email notifications"""
 
     def __init__(self):
-        """Initialize notification manager"""
-        self.config = get_config()
+        """Initialize notification manager
+
+        Deliberately does NOT read settings.yaml: notifications must remain
+        available when the main config is broken, so a ConfigError elsewhere
+        can still be emailed.
+        """
+        self.config_load_failed = False
         self.notification_config = self._load_notification_config()
         logger.info("NotificationManager initialized")
 
@@ -51,9 +65,27 @@ class NotificationManager:
             import yaml
             with open(config_file, 'r') as f:
                 config = yaml.safe_load(f)
-            return config.get('notifications', {})
+            if not isinstance(config, dict) or 'notifications' not in config:
+                raise ValueError(
+                    f"{config_file} is empty or missing the 'notifications' key"
+                )
+            return config['notifications']
         except Exception as e:
-            logger.error(f"Failed to load notification config: {e}")
+            # A corrupt config would otherwise silently disable ALL alerting,
+            # so this is the one load error that must escalate on its own.
+            logger.critical(
+                f"Notification config is broken -- all alerting degraded: {e}"
+            )
+            self.config_load_failed = True
+            self._send_via_msmtp(
+                f"[VPS ALERT] notifications.yaml is broken on {os.uname().nodename}",
+                f"Failed to load /opt/server-manager/config/notifications.yaml:\n"
+                f"  {e}\n\n"
+                f"Until this is fixed, backup/maintenance notifications cannot "
+                f"be sent normally. Fix the file or restore it from the "
+                f"server-manager Borg backup.",
+                [FALLBACK_ALERT_RECIPIENT],
+            )
             return {
                 'enabled': False,
                 'from_email': 'server-manager@localhost',
@@ -75,9 +107,13 @@ class NotificationManager:
             config_file.parent.mkdir(parents=True, exist_ok=True)
 
             import yaml
-            with open(config_file, 'w') as f:
+            # Write-then-rename so a crash or full disk can't leave a
+            # truncated file (which would disable all alerting on next load)
+            tmp_file = config_file.with_suffix('.yaml.tmp')
+            with open(tmp_file, 'w') as f:
                 yaml.dump({'notifications': config}, f, default_flow_style=False)
-            os.chmod(config_file, 0o600)
+            os.chmod(tmp_file, 0o600)
+            os.replace(tmp_file, config_file)
 
             self.notification_config = config
             logger.info("Notification config saved")
@@ -117,6 +153,11 @@ class NotificationManager:
             True if notification sent successfully
         """
         if not self.is_configured():
+            if not success:
+                logger.warning(
+                    f"Backup FAILURE notification for {service} skipped: "
+                    f"notifications not configured/enabled"
+                )
             return False
 
         # Check if we should notify
@@ -207,6 +248,11 @@ Server Manager v1.2
             True if notification sent successfully
         """
         if not self.is_configured():
+            if not success:
+                logger.warning(
+                    f"Maintenance FAILURE notification for {task} skipped: "
+                    f"notifications not configured/enabled"
+                )
             return False
 
         if success and not self.notification_config.get('notify_on_success', False):
@@ -261,6 +307,11 @@ Server Manager v1.2
             True if notification sent successfully
         """
         if not self.is_configured():
+            if issues:
+                logger.warning(
+                    f"Health check notification with {len(issues)} issue(s) "
+                    f"skipped: notifications not configured/enabled"
+                )
             return False
 
         # Only send if there are issues
@@ -321,6 +372,11 @@ Server Manager v1.2
             True if notification sent successfully
         """
         if not self.is_configured():
+            if level in ('WARNING', 'ERROR'):
+                logger.warning(
+                    f"Custom {level} notification '{subject}' skipped: "
+                    f"notifications not configured/enabled"
+                )
             return False
 
         try:
@@ -346,15 +402,28 @@ Server Manager v1.2
 
     def _send_email(self, subject: str, body: str) -> bool:
         """
-        Send email via SMTP
+        Send email via SMTP, falling back to local msmtp if that fails.
+
+        The primary path (authenticated submission via the mail server's
+        public hostname) depends on DNS, the reverse proxy, TLS, and auth
+        all working. The msmtp fallback delivers straight into the local
+        Postfix container, so it survives most of those failing -- which
+        matters because "the mail stack is broken" is exactly when failure
+        notifications are sent. If BOTH fail, the message is spooled to
+        FAILED_NOTIFICATION_DIR so it is never silently lost.
 
         Args:
             subject: Email subject
             body: Email body
 
         Returns:
-            True if sent successfully
+            True if sent successfully (by either path)
         """
+        to_emails = self.notification_config.get('to_emails', [])
+        if not to_emails:
+            logger.warning("No recipient emails configured")
+            return False
+
         try:
             smtp_server = self.notification_config.get('smtp_server', 'localhost')
             smtp_port = self.notification_config.get('smtp_port', 25)
@@ -362,11 +431,6 @@ Server Manager v1.2
             smtp_user = self.notification_config.get('smtp_user', '')
             smtp_password = self.notification_config.get('smtp_password', '')
             from_email = self.notification_config.get('from_email', 'server-manager@localhost')
-            to_emails = self.notification_config.get('to_emails', [])
-
-            if not to_emails:
-                logger.warning("No recipient emails configured")
-                return False
 
             # Create message
             msg = MIMEMultipart()
@@ -392,8 +456,67 @@ Server Manager v1.2
             return True
 
         except Exception as e:
-            logger.error(f"Failed to send email: {e}")
+            logger.error(f"SMTP send failed, trying msmtp fallback: {e}")
+
+        if self._send_via_msmtp(subject, body, to_emails):
+            logger.info(f"Email notification sent via msmtp fallback to {', '.join(to_emails)}")
+            return True
+
+        logger.critical("All notification delivery paths failed -- spooling message")
+        self._spool_failed_notification(subject, body, to_emails)
+        return False
+
+    def _send_via_msmtp(self, subject: str, body: str, recipients: List[str]) -> bool:
+        """
+        Send an email through the local msmtp relay (direct to the Postfix
+        container, no DNS/proxy/auth involved). Best-effort fallback path.
+
+        Returns:
+            True if msmtp accepted the message
+        """
+        message = (
+            f"To: {', '.join(recipients)}\n"
+            f"From: Server Manager <root@villaherrgard.com>\n"
+            f"Subject: {subject}\n"
+            f"\n"
+            f"{body}\n"
+        )
+        try:
+            result = subprocess.run(
+                ['msmtp', '-t'],
+                input=message.encode(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                stderr = result.stderr.decode(errors='replace').strip()
+                logger.error(f"msmtp fallback failed (rc={result.returncode}): {stderr}")
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"msmtp fallback failed: {e}")
             return False
+
+    def _spool_failed_notification(self, subject: str, body: str, recipients: List[str]):
+        """
+        Write an undeliverable notification to disk so it is not lost.
+        The weekly summary reports this directory when it is non-empty.
+        """
+        try:
+            FAILED_NOTIFICATION_DIR.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            spool_file = FAILED_NOTIFICATION_DIR / f"{timestamp}.eml"
+            spool_file.write_text(
+                f"To: {', '.join(recipients)}\n"
+                f"Subject: {subject}\n"
+                f"Date: {datetime.now().isoformat()}\n"
+                f"\n"
+                f"{body}\n"
+            )
+            logger.error(f"Undeliverable notification spooled to {spool_file}")
+        except Exception as e:
+            logger.critical(f"Could not even spool failed notification: {e}")
 
     def test_notification(self) -> Dict[str, any]:
         """
