@@ -40,29 +40,58 @@ class SchedulingManager:
 
         logger.info("SchedulingManager initialized")
 
+    def _read_crontab(self) -> str:
+        """
+        Read the current crontab, distinguishing "no crontab exists" from
+        read failures. A failed read MUST NOT be treated as an empty
+        crontab: every schedule writer merges its jobs with what this
+        returns, so misreading a transient failure as "empty" would
+        silently delete every other cron job on the next write (and the
+        pre-write backup would fail the same way, leaving no copy).
+
+        Returns:
+            Raw crontab content, or '' when no crontab exists yet
+
+        Raises:
+            RuntimeError: if crontab -l fails for any other reason
+        """
+        result = subprocess.run(
+            ["crontab", "-l"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            return result.stdout
+        if 'no crontab for' in result.stderr.lower():
+            return ''
+        raise RuntimeError(
+            f"'crontab -l' failed (rc={result.returncode}): "
+            f"{result.stderr.strip() or 'no error output'} -- refusing to "
+            f"continue; rewriting now could wipe existing cron jobs"
+        )
+
     def get_current_schedule(self) -> Dict[str, any]:
         """
         Get current cron schedule
 
         Returns:
             Dictionary containing current schedule information
+
+        Raises:
+            RuntimeError: if the crontab exists but cannot be read
         """
         try:
-            result = subprocess.run(
-                ["crontab", "-l"],
-                capture_output=True,
-                text=True
-            )
+            cron_content = self._read_crontab()
 
-            if result.returncode != 0:
+            if not cron_content:
                 # No crontab exists yet
                 return {
                     'exists': False,
                     'jobs': [],
+                    'preserved': [],
                     'raw': ''
                 }
 
-            cron_content = result.stdout
             jobs, preserved = self._parse_crontab(cron_content)
 
             return {
@@ -241,7 +270,13 @@ class SchedulingManager:
 
             # Persist the window choice in config
             self.config.set('backup.window', window_key)
-            self.config.save_config()
+            if not self.config.save_config():
+                # Crontab is already installed correctly; only the recorded
+                # window is stale, so warn rather than fail the operation
+                logger.warning(
+                    "Crontab updated but persisting backup.window to "
+                    "settings.yaml failed -- config now disagrees with cron"
+                )
 
             logger.info(f"Backup queue scheduled with window '{window_key}' (start: {start_hour:02d}:00)")
             return True
@@ -401,19 +436,18 @@ class SchedulingManager:
 
         Returns:
             Path of the backup file, or None if there was no crontab
-        """
-        result = subprocess.run(
-            ["crontab", "-l"],
-            capture_output=True,
-            text=True
-        )
 
-        if result.returncode != 0 or not result.stdout.strip():
+        Raises:
+            RuntimeError: if the crontab exists but cannot be read --
+            proceeding without a backup copy would be unsafe
+        """
+        content = self._read_crontab()
+        if not content.strip():
             return None
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         backup_path = self.schedule_dir / f"crontab.backup.{timestamp}"
-        backup_path.write_text(result.stdout)
+        backup_path.write_text(content)
 
         # Prune old backups, keep the 5 most recent
         backups = sorted(self.schedule_dir.glob('crontab.backup.*'))
@@ -442,11 +476,7 @@ class SchedulingManager:
         """
         try:
             if preserved is None:
-                _, preserved = self._parse_crontab(
-                    subprocess.run(
-                        ["crontab", "-l"], capture_output=True, text=True
-                    ).stdout or ''
-                )
+                _, preserved = self._parse_crontab(self._read_crontab())
 
             # Safety net: keep a copy of what we're about to replace
             self._backup_crontab()
