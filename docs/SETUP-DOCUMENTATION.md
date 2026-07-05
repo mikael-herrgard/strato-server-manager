@@ -1269,6 +1269,21 @@ curl https://mta-sts.villaherrgard.com/.well-known/mta-sts.txt
 └── tlsa-update.log                      # TLSA update logs
 ```
 
+### Login Status Screen (motd)
+```
+/etc/update-motd.d/
+├── 50-server-manager                    # Symlink -> /opt/server-manager/scripts/motd-status.sh
+├── 10-help-text                         # Disabled (chmod a-x) — Ubuntu noise
+├── 50-motd-news                         # Disabled (chmod a-x) — Ubuntu ads
+└── 50-landscape-sysinfo                 # Disabled (chmod a-x) — replaced by 50-server-manager
+
+/opt/server-manager/state/
+└── failed-notifications/                # Spool for notifications that failed all delivery paths
+```
+Re-enable an Ubuntu motd script with `chmod a+x` (must be `a+x`: UMASK 027
+makes plain `chmod +x` skip the others-bit). The `status` shell alias in
+`/root/.bashrc` runs the same screen on demand.
+
 ---
 
 ## Appendix C: Security Checklist
@@ -1320,6 +1335,7 @@ curl https://mta-sts.villaherrgard.com/.well-known/mta-sts.txt
 | 1.2 | 2026-01-11 | Added SRV records, combined certificate, Chrome warning notes |
 | 1.3 | 2026-04-12 | Replaced broken in-container deploy hook with host-side cron sync script |
 | 1.4 | 2026-07-04 | Rewrote backup strategy section to document the automated 6-service Borg system, monthly integrity check, and the mailcow MySQL dump fix |
+| 1.5 | 2026-07-05 | Added login status screen (motd) file locations: custom status script replaces Ubuntu's help-text/motd-news/landscape-sysinfo, plus failed-notifications spool |
 
 ---
 

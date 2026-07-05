@@ -18,6 +18,7 @@ Capabilities:
 - **Scheduling**: Managed crontab (queue-based night window, preserves foreign cron entries)
 - **Maintenance**: Updates with rollback, cleanup of aged backup artifacts
 - **Monitoring**: Service status, disk usage, backup history, email notifications
+- **Login status screen**: Compact health summary as motd on SSH login (also via the `status` command)
 
 ## The 6 Backup Services
 
@@ -149,8 +150,9 @@ Key settings live in `config/settings.yaml` (paths, Borg retention/compression, 
 │   ├── automated-backup.sh    # Cron entry for nightly backups
 │   ├── borg-check.sh          # Cron entry for monthly integrity check
 │   ├── cleanup-backups.sh     # Cron entry for cleanup
-│   ├── sync-mailcow-certs.sh  # Cert sync + TLSA rotation
+│   ├── sync-mailcow-certs.sh  # Cert sync + daily TLSA verification/rotation
 │   ├── weekly-summary.sh      # Sunday status email
+│   ├── motd-status.sh         # Login status screen (motd + `status` alias)
 │   └── ...
 ├── bootstrap/                 # Fresh-VPS installer
 ├── docs/                      # Project documentation
@@ -186,8 +188,38 @@ Without `init.sh`, the same result can be achieved manually: install via bootstr
 
 - Per-backup success/failure emails (failures include real error + log tail)
 - Monthly borg check failure alerts with per-repository errors
-- Weekly HTML summary email (system health, security, mail, backups, TLS, Docker)
-- Delivered via local msmtp relay through Mailcow's Postfix
+- Weekly HTML summary email (system health, security, mail, backups, TLS, Docker); failed checks render as red rows and escalate the subject line (`- WARN` / `- ALERT`) instead of suppressing the email
+- Primary delivery is authenticated SMTP submission; if that fails, sending **falls back to local msmtp** (direct to the Postfix container — no DNS/proxy/TLS/auth dependency). If both paths fail, the message is **spooled to `state/failed-notifications/`** so it is never silently lost; the login status screen and weekly summary surface a non-empty spool.
+- A corrupt `notifications.yaml` or `settings.yaml` triggers an alert instead of silently disabling alerting
+
+## Login Status Screen
+
+`scripts/motd-status.sh` renders a compact health summary on every SSH login
+(via a `/etc/update-motd.d/50-server-manager` symlink) and on demand with the
+`status` alias:
+
+```
+ Server status as of Sun Jul  5 10:49:38 CEST 2026
+
+  System load:   0.09 0.04 0.05     Docker:      21/21 running
+  Usage of /:    43% of 232G        Backups:     all 6 OK (oldest 8h)
+  Memory usage:  52% used           Borg check:  OK Jul 01
+  Swap usage:    0% used            TLS cert:    34 days left
+  Uptime:        3d, 3h, 21 min     Mail queue:  0 messages
+  Processes:     364                fail2ban:    1 banned
+```
+
+Values are color-coded (green/yellow/red, same thresholds as the alert
+emails). Problems summarize in-grid (`Backups: 2 problem(s)!`) and expand
+into detail lines below it — including undelivered notifications, a pending
+reboot flag, failed systemd units, and container restart counts.
+
+Design rules: local checks only (no network probes), every command
+timeboxed so a hung Docker daemon cannot hang the login, always exits 0.
+Paths are env-overridable (`MOTD_*`) for testing; respects `NO_COLOR`.
+Install (done by `init.sh` during DR): symlink into `/etc/update-motd.d/`,
+`status` alias in `.bashrc`, and `chmod a-x` on Ubuntu's `10-help-text`,
+`50-motd-news`, and `50-landscape-sysinfo` to reduce noise.
 
 ## Troubleshooting
 
@@ -210,7 +242,9 @@ flock -n /tmp/backup-<service>.lock /opt/server-manager/scripts/automated-backup
 - Check `/opt/server-manager/logs/server-manager.log`
 - Verify sufficient disk space (staging happens under `/var/backups/local`)
 
-**Broken settings.yaml** — the CLI exits with code 2 and a `Configuration error:` message rather than running with defaults.
+**Broken settings.yaml** — the CLI exits with code 2 and a `Configuration error:` message rather than running with defaults (and sends an alert, since a broken config would otherwise kill every cron job silently).
+
+**"LOST ALERTS" on the login screen** — one or more notifications failed both delivery paths and were spooled. Read them with `cat /opt/server-manager/state/failed-notifications/*.eml`, fix the mail path (is Postfix up? `docker ps | grep postfix`), then delete the spooled files.
 
 ## Development
 
