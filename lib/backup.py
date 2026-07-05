@@ -6,6 +6,7 @@ Handles Borg backups for nginx, Mailcow, and application files
 import gzip
 import os
 import subprocess
+import time
 from datetime import datetime
 from typing import Dict, List, Optional, Union
 from .utils import (
@@ -137,7 +138,8 @@ class BackupManager(BorgRepoBase):
         verify: bool = True,
         excludes: Optional[List[str]] = None,
         required_gb: int = 10,
-        skip_missing: bool = False
+        skip_missing: bool = False,
+        required_paths: Optional[List[str]] = None
     ) -> bool:
         """
         Generic backup flow for services that are plain paths on disk:
@@ -152,6 +154,9 @@ class BackupManager(BorgRepoBase):
             skip_missing: If True, missing paths are skipped with a
                           warning (at least one must exist); if False,
                           any missing path aborts the backup
+            required_paths: Paths that abort the backup when missing even
+                            under skip_missing — for files whose absence
+                            must never produce a "successful" archive
 
         Returns:
             True if successful
@@ -162,9 +167,16 @@ class BackupManager(BorgRepoBase):
             return False
 
         if skip_missing:
-            existing = [p for p in source_paths if os.path.exists(p)]
+            required = set(required_paths or [])
+            existing = []
             for p in source_paths:
-                if p not in existing:
+                if os.path.exists(p):
+                    existing.append(p)
+                elif p in required:
+                    return self._error(
+                        f"{service} backup aborted: required path missing: {p}"
+                    )
+                else:
                     logger.warning(f"Path not found, skipping: {p}")
             if not existing:
                 return self._error(f"No source paths found for {service} backup")
@@ -277,6 +289,85 @@ class BackupManager(BorgRepoBase):
         logger.info(f"Mailcow database dumped: {len(result.stdout) / 1048576:.1f} MB uncompressed")
         return True
 
+    # Components mailcow's script must produce (as backup_<name>.tar.zst or
+    # .tar.gz) and the minimum plausible size in bytes. crypt/postfix are
+    # legitimately tiny; vmail holding all mail must never be near-empty.
+    MAILCOW_COMPONENTS = {
+        'vmail': 1024 * 1024,
+        'crypt': 1,
+        'redis': 1024,
+        'rspamd': 1024,
+        'postfix': 1,
+    }
+
+    def _validate_mailcow_backup(
+        self, backup_dir: str, backup_type: str, started_at: float
+    ) -> bool:
+        """
+        Verify that the directory mailcow's backup script left behind is
+        fresh and complete. The script keeps ~7 days of dated directories
+        and exits 0 even when a component silently fails, so "newest
+        directory exists" proves nothing by itself.
+
+        Args:
+            backup_dir: The directory selected as this run's output
+            backup_type: The backup type the script was invoked with
+            started_at: time.time() taken just before the script ran
+
+        Returns:
+            True if the backup looks fresh and complete
+        """
+        # Freshness: the directory must have been written during this run.
+        # 60s slack covers filesystem timestamp granularity/clock skew.
+        dir_mtime = os.path.getmtime(backup_dir)
+        if dir_mtime < started_at - 60:
+            age_min = (started_at - dir_mtime) / 60
+            return self._error(
+                f"Mailcow backup script exited 0 but produced no new backup "
+                f"directory -- newest is {backup_dir} ({age_min:.0f} min older "
+                f"than this run). A component of the script is failing silently."
+            )
+
+        if backup_type == 'all':
+            expected = self.MAILCOW_COMPONENTS
+        elif backup_type in self.MAILCOW_COMPONENTS:
+            expected = {backup_type: self.MAILCOW_COMPONENTS[backup_type]}
+        else:
+            # db/mysql are produced by _dump_mailcow_db, which validates itself
+            return True
+
+        problems = []
+        for component, min_size in expected.items():
+            candidates = [
+                os.path.join(backup_dir, f"backup_{component}.tar.zst"),
+                os.path.join(backup_dir, f"backup_{component}.tar.gz"),
+            ]
+            found = next((c for c in candidates if os.path.isfile(c)), None)
+            if found is None:
+                problems.append(f"{component}: archive missing")
+            elif os.path.getsize(found) < min_size:
+                problems.append(
+                    f"{component}: {os.path.getsize(found)} bytes "
+                    f"(expected >= {min_size})"
+                )
+
+        if backup_type == 'all' and not os.path.isfile(
+            os.path.join(backup_dir, 'mailcow.conf')
+        ):
+            problems.append("mailcow.conf: missing")
+
+        if problems:
+            return self._error(
+                f"Mailcow backup at {backup_dir} is incomplete despite the "
+                f"script exiting 0: {'; '.join(problems)}"
+            )
+
+        logger.info(
+            f"Mailcow backup validated: fresh and all "
+            f"{len(expected)} component(s) present"
+        )
+        return True
+
     def backup_mailcow(self, backup_type: str = "all", verify: bool = True) -> bool:
         """
         Backup Mailcow using official backup script
@@ -317,6 +408,7 @@ class BackupManager(BorgRepoBase):
 
         try:
             # Run Mailcow's official backup script with local retention policy
+            script_started_at = time.time()
             with CommandExecutor(f"Mailcow backup ({backup_type})"):
                 cmd = [backup_script, 'backup', backup_type, '--delete-days', '7']
                 returncode, stdout, stderr = run_command(
@@ -340,6 +432,16 @@ class BackupManager(BorgRepoBase):
             # Get the most recent backup directory
             latest_backup = max(backup_dirs, key=os.path.getmtime)
             logger.info(f"Mailcow backup created: {latest_backup}")
+
+            # The script exits 0 even when it silently skips components
+            # (historical precedent: the MySQL dump), so never trust it:
+            # verify the directory is from THIS run and contains every
+            # expected component. Must happen before _dump_mailcow_db,
+            # which would refresh the mtime of a stale directory.
+            if not self._validate_mailcow_backup(
+                latest_backup, backup_type, script_started_at
+            ):
+                return False
 
             # The official script silently skips the DB on this host (its
             # --sysctl IPv6 flag fails with kernel IPv6 disabled), so dump
@@ -441,6 +543,7 @@ class BackupManager(BorgRepoBase):
         logger.info("Stopping monitoring services for consistent backup...")
         services_to_stop = ['grafana-server', 'influxdb']
         stopped_services = []
+        restart_failures = []
 
         try:
             for svc in services_to_stop:
@@ -448,7 +551,14 @@ class BackupManager(BorgRepoBase):
                     if stop_systemd_service(svc):
                         stopped_services.append(svc)
                     else:
-                        logger.warning(f"Failed to stop {svc}, continuing anyway")
+                        # A live-file copy of InfluxDB/Grafana risks an
+                        # inconsistent, unrestorable archive that would
+                        # still report success — abort instead
+                        result = self._error(
+                            f"Failed to stop {svc} — aborting backup rather "
+                            f"than archiving live database files"
+                        )
+                        return result
 
             excludes = [
                 '*/.git/*',
@@ -457,15 +567,14 @@ class BackupManager(BorgRepoBase):
                 '*/logs/*',
             ]
 
-            return self._finish_backup('monitoring-stack', source_paths, excludes, verify)
+            result = self._finish_backup('monitoring-stack', source_paths, excludes, verify)
 
         except Exception as e:
-            return self._error(f"Monitoring stack backup failed: {e}")
+            result = self._error(f"Monitoring stack backup failed: {e}")
 
         finally:
             # Always restart services
             logger.info("Restarting monitoring services...")
-            restart_failures = []
             for svc in reversed(stopped_services):
                 if not start_systemd_service(svc):
                     restart_failures.append(svc)
@@ -473,10 +582,22 @@ class BackupManager(BorgRepoBase):
                 logger.error(f"CRITICAL: Failed to restart services: {', '.join(restart_failures)}")
                 logger.error("Manual intervention required — run: systemctl start " + " ".join(restart_failures))
 
+        if restart_failures:
+            # The archive itself may be fine, but metrics collection is now
+            # down — the run must fail so the notification email fires
+            return self._error(
+                f"Backup archived but services failed to restart: "
+                f"{', '.join(restart_failures)} — metrics collection is DOWN. "
+                f"Run: systemctl start {' '.join(restart_failures)}"
+            )
+        return result
+
     def backup_credentials(self, verify: bool = True) -> bool:
         """
-        Backup centralized credentials files (/root/.credentials.env
-        and /root/.dns-config). Missing files are skipped with a warning.
+        Backup centralized credentials files. A missing .dns-config is
+        skipped with a warning, but a missing .credentials.env fails the
+        backup: protecting that file is this archive's entire purpose, and
+        a "successful" backup without it would mask its loss until DR.
         """
         return self._backup_service(
             'credentials',
@@ -484,6 +605,7 @@ class BackupManager(BorgRepoBase):
             verify=verify,
             required_gb=1,
             skip_missing=True,
+            required_paths=['/root/.credentials.env'],
         )
 
     def get_backup_status(self) -> Dict[str, any]:
