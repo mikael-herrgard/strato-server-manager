@@ -6,6 +6,37 @@ set -euo pipefail
 
 ALERT_EMAIL="micke@nysattra.se"
 FROM_NAME="VPS Weekly Summary"
+
+# If anything outside the collectors still aborts the script, leave a trace
+# and try a minimal plain-text alert: a summary email that silently never
+# arrives is the worst failure mode this script can have.
+on_unexpected_error() {
+    local line="$1"
+    logger -t weekly-summary "FAILED unexpectedly at line ${line} -- no summary sent"
+    msmtp -t <<EOF2 || true
+To: ${ALERT_EMAIL}
+From: ${FROM_NAME} <root@villaherrgard.com>
+Subject: [VPS ALERT] Weekly summary script crashed
+
+weekly-summary.sh aborted at line ${line} on $(date '+%Y-%m-%d %H:%M:%S').
+The weekly health report was NOT generated. Check the script and syslog.
+EOF2
+}
+trap 'on_unexpected_error $LINENO' ERR
+
+# Run a collector with errexit suspended inside it (bash disables set -e in
+# a condition context), so a failing probe -- docker down, missing log file,
+# dig/curl timeout -- degrades to the collector's own red/UNREACHABLE row
+# instead of killing the whole report before it is sent. If the section
+# variable is still empty afterwards, render an explicit failure block.
+run_collector() {
+    local fn="$1" var="${2:-}" title="${3:-}"
+    "$fn" || true
+    if [ -n "$var" ] && [ -z "${!var:-}" ]; then
+        printf -v "$var" '<h2>%s</h2>\n<table><tr><td class="value error">Section collector failed</td></tr></table>' "$title"
+        bump_status error
+    fi
+}
 HOSTNAME=$(hostname)
 DATE=$(date '+%Y-%m-%d')
 WEEK_AGO=$(date -d '7 days ago' '+%Y-%m-%d %H:%M:%S')
@@ -21,7 +52,7 @@ STALE_HOURS=48
 status_class() {
     case "$1" in
         OK)                          echo "ok" ;;
-        STALE|"RENEW SOON"|"RENEWAL OVERDUE") echo "warn" ;;
+        STALE|"RENEW SOON"|"RENEWAL OVERDUE"|UNEXPECTED*|UNKNOWN) echo "warn" ;;
         EXPIRING|DEGRADED*|NONE|"NO LOG"|MISMATCH|"NO DNSSEC"|UNREACHABLE) echo "error" ;;
         *)                           echo "" ;;
     esac
@@ -89,9 +120,13 @@ collect_security() {
     local sshd_banned_now recidive_banned_now
     local sshd_bans_week ssh_failures
 
-    # Current fail2ban state
+    # Current fail2ban state. "unavailable" must not render as a quiet
+    # all-zeros week -- flag it so the operator sees fail2ban is down.
     sshd_status=$(fail2ban-client status sshd 2>/dev/null || echo "unavailable")
     recidive_status=$(fail2ban-client status recidive 2>/dev/null || echo "unavailable")
+    if [ "$sshd_status" = "unavailable" ] || [ "$recidive_status" = "unavailable" ]; then
+        bump_status warn
+    fi
 
     sshd_banned_now=$(echo "$sshd_status" | grep -oP 'Currently banned:\s+\K\d+' || echo "0")
     recidive_banned_now=$(echo "$recidive_status" | grep -oP 'Currently banned:\s+\K\d+' || echo "0")
@@ -107,6 +142,9 @@ collect_security() {
     banned_ips=$(echo "$sshd_status" | grep -oP 'Banned IP list:\s+\K.*' || echo "none")
     if [ -z "$banned_ips" ]; then
         banned_ips="none"
+    fi
+    if [ "$sshd_status" = "unavailable" ]; then
+        banned_ips="fail2ban unavailable"
     fi
 
     SECTION_SECURITY="<h2>Security</h2>
@@ -131,10 +169,14 @@ collect_mail() {
     bounced=$(echo "$postfix_logs" | grep -c 'status=bounced' || true)
     rejected=$(echo "$postfix_logs" | grep -c 'NOQUEUE: reject' || true)
 
-    # Mail queue
-    queue_count=$(docker exec mailcowdockerized-postfix-mailcow-1 mailq 2>/dev/null | tail -1 | grep -oP '\d+(?= Request)' || echo "0")
-    if [ -z "$queue_count" ]; then
-        queue_count="0"
+    # Mail queue. An empty mailq output means "Mail queue is empty" (0);
+    # a failed docker exec must NOT default to the healthy-looking 0.
+    local mailq_out
+    if mailq_out=$(docker exec mailcowdockerized-postfix-mailcow-1 mailq 2>/dev/null); then
+        queue_count="$(echo "$mailq_out" | tail -1 | grep -oP '\d+(?= Request)' || echo "0") messages"
+    else
+        queue_count="unknown — postfix container unreachable"
+        bump_status warn
     fi
 
     # Rspamd stats
@@ -153,7 +195,7 @@ collect_mail() {
 $(html_kv_row 'Delivered (7d)' "$sent")
 $(html_kv_row 'Bounced (7d)' "$bounced")
 $(html_kv_row 'Rejected (7d)' "$rejected")
-$(html_kv_row 'Queue' "${queue_count} messages")
+$(html_kv_row 'Queue' "${queue_count}")
 $(html_kv_row 'Rspamd ham' "$ham_count")
 $(html_kv_row 'Rspamd spam' "$spam_count")
 </table>"
@@ -170,6 +212,7 @@ collect_backups() {
         if [ ! -f "$log_file" ]; then
             local cls
             cls=$(status_class "NO LOG")
+            bump_status "$cls"
             rows+="<tr><td>${service}</td><td>--</td><td>--</td><td class=\"${cls}\">NO LOG</td></tr>"
             continue
         fi
@@ -192,10 +235,12 @@ collect_backups() {
 
             local cls
             cls=$(status_class "$status")
+            bump_status "$cls"
             rows+="<tr><td>${service}</td><td>${last_success}</td><td>${age_hours}h</td><td class=\"${cls}\">${status}</td></tr>"
         else
             local cls
             cls=$(status_class "NONE")
+            bump_status "$cls"
             rows+="<tr><td>${service}</td><td>--</td><td>--</td><td class=\"${cls}\">NONE</td></tr>"
         fi
 
@@ -514,6 +559,7 @@ collect_docker() {
 
     local cls
     cls=$(status_class "$status")
+    bump_status "$cls"
 
     # Check for containers with restart counts > 0
     local restarts
@@ -541,21 +587,27 @@ ${restart_rows}"
 
 # ── Main ────────────────────────────────────────────────────────────
 
-collect_system
-collect_security
-collect_mail
-collect_backups
-collect_tls
-collect_dane
-collect_mtasts
-collect_cert_renewal
-collect_mail_reports
-collect_docker
+# Every collector runs error-tolerantly: a failing probe becomes a red row
+# in the report, never a dead email. SECTION_RENEWAL and SECTION_MAIL_REPORTS
+# may be legitimately empty, so they skip the empty-section check.
+run_collector collect_system       SECTION_SYSTEM   "System Health"
+run_collector collect_security     SECTION_SECURITY "Security"
+run_collector collect_mail         SECTION_MAIL     "Mail"
+run_collector collect_backups      SECTION_BACKUPS  "Backups"
+run_collector collect_tls          SECTION_TLS      "TLS Certificates"
+run_collector collect_dane         SECTION_DANE     "DANE / TLSA"
+run_collector collect_mtasts       SECTION_MTASTS   "MTA-STS"
+run_collector collect_cert_renewal
+run_collector collect_mail_reports
+run_collector collect_docker       SECTION_DOCKER   "Docker"
 
-# Compose subject: append "- ALERT" first if any red status, then "+ Cert Renewal" if a renewal happened
+# Compose subject: append "- ALERT"/"- WARN" first if any section escalated,
+# then "+ Cert Renewal" if a renewal happened
 SUBJECT="[VPS Summary] Weekly Health Report — ${HOSTNAME} (${DATE})"
 if [ "$OVERALL_STATUS" = "error" ]; then
     SUBJECT="[VPS Summary - ALERT] Weekly Health Report — ${HOSTNAME} (${DATE})"
+elif [ "$OVERALL_STATUS" = "warn" ]; then
+    SUBJECT="[VPS Summary - WARN] Weekly Health Report — ${HOSTNAME} (${DATE})"
 fi
 if [ -n "$SECTION_RENEWAL" ]; then
     SUBJECT="${SUBJECT} + Cert Renewal"
