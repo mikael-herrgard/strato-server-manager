@@ -58,7 +58,9 @@ sync_certbot_credentials() {
             if grep -q "^dns_gandi_token=" "$cred_file"; then
                 sed -i "s|^dns_gandi_token=.*|dns_gandi_token=$GANDI_TOKEN|" "$cred_file"
                 chmod 600 "$cred_file"
-                ((gandi_synced++))
+                # Not ((gandi_synced++)): that returns exit status 1 when
+                # incrementing from 0, which kills the script under set -e.
+                gandi_synced=$((gandi_synced + 1))
             fi
         done
         if [ "$gandi_synced" -eq 0 ]; then

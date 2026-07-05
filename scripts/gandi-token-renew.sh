@@ -155,7 +155,9 @@ if [[ -d "$CERTBOT_CRED_DIR" ]]; then
             sed -i "s|^dns_gandi_token=.*|dns_gandi_token=${NEW_TOKEN}|" "$cred_file"
             chmod 600 "$cred_file"
             log "Updated Gandi token in: $cred_file"
-            ((synced++))
+            # Not ((synced++)): that returns exit status 1 when incrementing
+            # from 0, which kills the script under set -e.
+            synced=$((synced + 1))
         fi
     done
     if (( synced == 0 )); then
